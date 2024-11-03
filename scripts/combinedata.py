@@ -4,14 +4,14 @@ from pyproj import Transformer
 import geopandas as gpd
 from shapely.geometry import Point
 import logging
-
+from pathlib import Path
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Paths to your files
-geojson_path = '/home/syrichta/routing/davao_specific_barangays_road_network.geojson'
-dem_path = '/home/syrichta/routing/dem'
-flood_depth_path = '/home/syrichta/routing/flood'
+geojson_path = Path(__file__).parent.parent /'davao_specific_barangays_road_network.geojson'
+dem_path = Path(__file__).parent.parent /'dem'
+flood_depth_path = Path(__file__).parent.parent /'flood'
 
 # Create a transformer to convert from WGS 84 (EPSG:4326) to Web Mercator (EPSG:3857)
 transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)

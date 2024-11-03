@@ -12,10 +12,10 @@ logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", fo
 
 # ACO parameters
 num_ants = 100
-num_iterations = 10000
-alpha = 1.0        # Pheromone importance
-beta = 5.0         # Heuristic importance
-evaporation_rate = 0.5
+num_iterations = 1
+alpha = 3.0        # Pheromone importance
+beta = 2.0         # Heuristic importance
+evaporation_rate = 0.3
 pheromone_constant = 100.0
 
 # Load GeoJSON data
@@ -41,11 +41,17 @@ def build_graph(geojson_data):
 
     return G
 
-# ACO function with logging
+def coordinates_equal(coord1, coord2, tolerance=0.5):
+    # Convert (longitude, latitude) to (latitude, longitude) for geodesic
+    return geodesic((coord1[1], coord1[0]), (coord2[1], coord2[0])).meters < tolerance
+
+
 def ant_colony_optimization(G, start_node, end_node):
     pheromone_levels = {tuple(sorted(edge)): 1.0 for edge in G.edges()}
     best_path = None
     best_path_length = float('inf')
+    path_found = False  # Track if any valid path reaches the end node
+    all_paths = []  # Store all paths taken by the ants
 
     for iteration in range(num_iterations):
         logging.info(f"Iteration {iteration + 1}/{num_iterations}")
@@ -53,47 +59,67 @@ def ant_colony_optimization(G, start_node, end_node):
         paths = []
         path_lengths = []
 
-        for ant in tqdm(range(num_ants), desc=f"Running ACO (Iteration {iteration + 1})"):
+        for ant in tqdm(range(num_ants), desc=f"Running ACO (Iteration {iteration + 1})", dynamic_ncols=False):
             current_node = start_node
-            path = [current_node]
+            stack = [current_node]  # Use a stack for backtracking
+            visited = set([current_node])  # Track visited nodes
             path_length = 0
 
-            while current_node != end_node:
+            while stack:
+                current_node = stack[-1]  # Look at the top of the stack (current node)
+
+                if current_node == end_node:
+                    path_found = True
+                    path = list(stack)  # Successful path found
+                    path_length = sum(G[stack[i]][stack[i + 1]]["distance"] for i in range(len(stack) - 1))
+                    logging.info(f"Ant {ant + 1} completed path: {path} with length: {path_length:.2f}")
+                    
+                    # Check if this is the best path
+                    if path_length < best_path_length:
+                        best_path = path
+                        best_path_length = path_length
+                        logging.info(f"New best path found by Ant {ant + 1} with length: {best_path_length:.2f}")
+
+                    paths.append(path)
+                    path_lengths.append(path_length)
+                    break  # Exit while loop on success
+
+                # Get neighbors and filter visited ones
                 neighbors = list(G.neighbors(current_node))
-                neighbors = [n for n in neighbors if n not in path]
+                unvisited_neighbors = [n for n in neighbors if n not in visited]
 
-                if not neighbors:
-                    logging.info(f"Ant {ant + 1} stuck at node {current_node} (no valid neighbors).")
-                    break
+                if unvisited_neighbors:
+                    # Calculate desirability for unvisited neighbors
+                    desirability = []
+                    for neighbor in unvisited_neighbors:
+                        distance = G[current_node][neighbor]["distance"]
+                        edge = tuple(sorted((current_node, neighbor)))
+                        pheromone = pheromone_levels.get(edge, 1.0)
+                        desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
 
-                desirability = []
-                for neighbor in neighbors:
-                    distance = G[current_node][neighbor]["distance"]
-                    edge = tuple(sorted((current_node, neighbor)))
-                    pheromone = pheromone_levels.get(edge, 1.0)  # Default to 1.0 if missing
-                    desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
+                    # Select the next node based on probabilities
+                    desirability_sum = sum(desirability)
+                    probabilities = [d / desirability_sum for d in desirability]
+                    next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
 
-                desirability_sum = sum(desirability)
-                probabilities = [d / desirability_sum for d in desirability]
-                next_node = random.choices(neighbors, weights=probabilities)[0]
+                    # Log the traversal step for this ant
+                    logging.info(f"Ant {ant + 1} moves from {current_node} to {next_node}.")
 
-                path.append(next_node)
-                path_length += G[current_node][next_node]["distance"]
-                current_node = next_node
+                    stack.append(next_node)  # Move to the next node
+                    visited.add(next_node)    # Mark the next node as visited
+                    path_length += G[current_node][next_node]["distance"]
+                else:
+                    # Backtrack if no unvisited neighbors
+                    logging.info(f"Ant {ant + 1} stuck at node {current_node} (no unvisited neighbors). Backtracking...")
+                    stack.pop()  # Backtrack by removing the last node from the stack
 
-            logging.info(f"Ant {ant + 1} completed path: {path} with length: {path_length:.2f}")
+            all_paths.append(stack)  # Store the path taken by this ant
 
-            if current_node == end_node and path_length < best_path_length:
-                best_path = path
-                best_path_length = path_length
-                logging.info(f"New best path found by Ant {ant + 1} with length: {best_path_length:.2f}")
-
-            paths.append(path)
-            path_lengths.append(path_length)
-
+        # Pheromone evaporation
         for edge in pheromone_levels:
             pheromone_levels[edge] *= (1 - evaporation_rate)
 
+        # Pheromone deposit
         for path, length in zip(paths, path_lengths):
             if length > 0:
                 pheromone_deposit = pheromone_constant / length
@@ -102,8 +128,14 @@ def ant_colony_optimization(G, start_node, end_node):
                     pheromone_levels[edge] += pheromone_deposit
 
         logging.info(f"Pheromone levels after iteration {iteration + 1}: {pheromone_levels}")
+        logging.info("")  # Add a blank line for readability
 
-    return best_path, best_path_length
+    # Ensure returning three values
+    if not path_found:
+        return None, float('inf'), all_paths  # Return all paths even if no valid path is found
+
+    return best_path, best_path_length, all_paths  # Return all paths
+
 
 
 # Main script
@@ -123,6 +155,7 @@ end_time = time.time()
 # Display results
 if best_path:
     print(f"ACO completed in {end_time - start_time:.2f} seconds")
+    print(f"Best path: {best_path}")
     print(f"Best path length: {best_path_length:.2f} meters")
 else:
     print("ACO failed to find a path between the start and end nodes.")

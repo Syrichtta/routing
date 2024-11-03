@@ -70,6 +70,27 @@ def calculate_metrics(path, G, speed_mps):
 
     return total_gain, total_loss, max_flood_depth, total_distance, travel_time
 
+def calculate_slope(node1, node2, G):
+    if G.has_edge(node1, node2):
+        edge_data = G[node1][node2]
+        elevation1 = edge_data['elevations'][0]  # Elevation of node1
+        elevation2 = edge_data['elevations'][1]  # Elevation of node2
+        horizontal_distance = edge_data['distance']  # Horizontal distance between nodes
+
+        # Calculate the change in elevation
+        elevation_change = elevation2 - elevation1
+
+        # Calculate slope (rise/run)
+        if horizontal_distance > 0:  # Prevent division by zero
+            slope = elevation_change / horizontal_distance
+        else:
+            slope = 0
+
+        return slope
+    else:
+        return 0  # Return 0 if no edge exists
+
+
 
 # Visualize the shortest path on a map with start/end pins and metrics
 def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_flood_depth, total_distance, travel_time, start_node, end_node):
@@ -129,10 +150,34 @@ def select_connected_nodes(G):
 
     return node1, node2
 
-# Heuristic function for A*
-def heuristic(node1, node2):
-    # Calculate the straight-line distance between the two nodes
-    return geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
+# # Heuristic function for A*
+# def heuristic(node1, node2):
+#     # Calculate the straight-line distance between the two nodes
+#     return geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
+
+# New heuristic function
+def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
+    # Calculate the straight-line distance as part of the heuristic
+    h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
+
+    # Initialize metrics
+    distance = 0  # Initialize distance to 0
+    slope = 0     # Initialize slope to 0
+    inundation = 0 # Initialize inundation to 0
+
+    if G.has_edge(node1, node2):
+        distance = G[node1][node2]['distance']  # Get distance if edge exists
+        slope = calculate_slope(node1, node2, G)  # Calculate slope based on elevation
+        inundation = G[node1][node2]['flood_depths'][1] if G.has_edge(node1, node2) else 0  # Define how to get inundation
+
+    # Compute total cost with the new weights
+    f_n = (alpha * (distance + h_n) +
+           beta * (distance) +   # Adjust as needed
+           gamma * (slope) +     # Adjust as needed
+           delta * (inundation))  # Adjust as needed
+
+    return f_n
+
 
 # Main logic to load the GeoJSON and run A*
 geojson_file = 'updated_roads.geojson'
@@ -153,7 +198,8 @@ print(f"Start node: {start_node}, End node: {end_node}")
 start_time = time.time()
 
 try:
-    shortest_path = nx.astar_path(G, source=start_node, target=end_node, heuristic=heuristic)
+    # Update A* call with the new heuristic
+    shortest_path = nx.astar_path(G, source=start_node, target=end_node, heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, 0.2, 0.25, 0.2, 0.1, 0.25))
     end_time = time.time()
     computation_time = end_time - start_time
     print(f"Shortest path computed in {computation_time:.4f} seconds")

@@ -1,9 +1,10 @@
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # Load the GeoJSON file
 # input_file = "/home/syrichta/routing/davao_road_network.geojson"
-input_file = "/home/syrichta/routing/updated_roads.geojson"
+input_file = Path(__file__).parent.parent / "davao_specific_barangays_road_network.geojson"
 print(f"Loading data from {input_file}...")
 gdf = gpd.read_file(input_file)
 print("Data loaded successfully.")
