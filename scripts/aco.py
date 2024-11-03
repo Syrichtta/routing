@@ -6,16 +6,17 @@ import time
 import logging
 from geopy.distance import geodesic
 from tqdm import tqdm
+import folium  # Make sure to install folium for visualization
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO parameters
 num_ants = 100
-num_iterations = 1
-alpha = 3.0        # Pheromone importance
-beta = 2.0         # Heuristic importance
-evaporation_rate = 0.3
+num_iterations = 10
+alpha = 5.0        # Pheromone importance
+beta = 1.0         # Heuristic importance
+evaporation_rate = 0.5
 pheromone_constant = 100.0
 
 # Load GeoJSON data
@@ -44,7 +45,6 @@ def build_graph(geojson_data):
 def coordinates_equal(coord1, coord2, tolerance=0.5):
     # Convert (longitude, latitude) to (latitude, longitude) for geodesic
     return geodesic((coord1[1], coord1[0]), (coord2[1], coord2[0])).meters < tolerance
-
 
 def ant_colony_optimization(G, start_node, end_node):
     pheromone_levels = {tuple(sorted(edge)): 1.0 for edge in G.edges()}
@@ -136,7 +136,27 @@ def ant_colony_optimization(G, start_node, end_node):
 
     return best_path, best_path_length, all_paths  # Return all paths
 
+# Visualization of paths and the entire network
+def visualize_paths(G, all_paths, start_node, end_node, output_html='aco_paths_map.html'):
+    # Create a base map
+    base_map = folium.Map(location=[7.0866, 125.5782], zoom_start=14)  # Center on Davao City
 
+    # Add start and end markers
+    folium.Marker(location=(start_node[1], start_node[0]), icon=folium.Icon(color='green', icon='info-sign')).add_to(base_map)
+    folium.Marker(location=(end_node[1], end_node[0]), icon=folium.Icon(color='red', icon='info-sign')).add_to(base_map)
+
+    # Visualize the entire network in blue
+    for edge in G.edges(data=True):
+        node1, node2, _ = edge
+        folium.PolyLine(locations=[(lat, lon) for lon, lat in [node1, node2]], color='blue', weight=2.5, opacity=0.7).add_to(base_map)
+
+    # Visualize all paths taken by the ants in red
+    for path in all_paths:
+        folium.PolyLine(locations=[(lat, lon) for lon, lat in path], color='red', weight=2.5, opacity=0.7).add_to(base_map)
+
+    # Save the map to an HTML file
+    base_map.save(output_html)
+    print(f"Network and all paths visualized and saved to {output_html}")
 
 # Main script
 geojson_file = 'updated_roads.geojson'
@@ -145,11 +165,14 @@ output_html = 'aco_path_map.html'
 # Load GeoJSON and build graph
 geojson_data = load_geojson(geojson_file)
 G = build_graph(geojson_data)
-start_node, end_node = (125.5722492, 7.089552), (125.5868572, 7.0836662)
-# Start node: (125.5722492, 7.089552), End node: (125.5868572, 7.0836662)
+
+# Define start and end nodes (longitude, latitude)
+# Start node: (125.6217581, 7.0680991), End node: (125.6188844, 7.0671599)
+start_node = (125.6217581, 7.0680991) 
+end_node = (125.6188844, 7.0671599)  
 
 start_time = time.time()
-best_path, best_path_length = ant_colony_optimization(G, start_node, end_node)
+best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node)
 end_time = time.time()
 
 # Display results
@@ -159,3 +182,6 @@ if best_path:
     print(f"Best path length: {best_path_length:.2f} meters")
 else:
     print("ACO failed to find a path between the start and end nodes.")
+
+# Call the visualization function
+visualize_paths(G, all_paths, start_node, end_node)

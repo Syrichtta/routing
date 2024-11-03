@@ -1,2 +1,2 @@
 
-evaporation_rate = 0.5
+num_iterations = 1

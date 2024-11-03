@@ -139,10 +139,10 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    node1 = random.choice(nodes)
-    node2 = random.choice(nodes)
-    # node1 = (125.6037021, 7.0469834)
-    # node2 = (125.5748513, 7.030857)
+    # node1 = random.choice(nodes)
+    # node2 = random.choice(nodes)
+    node1 = (125.6217581, 7.0680991) 
+    node2 = (125.6188844, 7.0671599)  
 
     # Ensure the nodes are connected
     while not nx.has_path(G, node1, node2):
@@ -203,6 +203,10 @@ try:
     end_time = time.time()
     computation_time = end_time - start_time
     print(f"Shortest path computed in {computation_time:.4f} seconds")
+
+    # print("Best path found (list of nodes):")
+    # for node in shortest_path:
+    #     print(node)
 
     # Calculate metrics
     total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(shortest_path, G, speed_mps)
