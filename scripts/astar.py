@@ -139,14 +139,15 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    # node1 = random.choice(nodes)
+    node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
-    node1 = (125.6217581, 7.0680991) 
-    node2 = (125.6188844, 7.0671599)  
+    # node1 = (125.6023788, 7.063822)
+    node2 = (125.579685, 7.0656892)  
+    # shrine hills: (125.5779316, 7.0707941)  
 
     # Ensure the nodes are connected
-    while not nx.has_path(G, node1, node2):
-        node2 = random.choice(nodes)
+    # while not nx.has_path(G, node1, node2):
+    #     node2 = random.choice(nodes)
 
     return node1, node2
 
