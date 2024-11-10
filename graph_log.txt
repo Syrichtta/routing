@@ -1,0 +1,6 @@
+Iteration 1/1000: Shortest path length = 5199.396433657522
+Iteration 2/1000: Shortest path length = 5199.396433657522
+Iteration 3/1000: Shortest path length = 5199.396433657522
+Iteration 4/1000: Shortest path length = 5199.396433657522
+Iteration 5/1000: Shortest path length = 5199.396433657522
+Iteration 6/1000: Shortest path length = 5199.396433657522

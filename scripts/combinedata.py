@@ -1,27 +1,23 @@
 import json
 import rasterio
 from pyproj import Transformer
-import geopandas as gpd
-from shapely.geometry import Point
 import logging
 from pathlib import Path
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from tqdm import tqdm
+
+# Set up logging to show only critical issues
+logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Paths to your files
-geojson_path = Path(__file__).parent.parent /'davao_specific_barangays_road_network.geojson'
-dem_path = Path(__file__).parent.parent /'dem'
-flood_depth_path = Path(__file__).parent.parent /'flood'
+geojson_path = Path(__file__).parent.parent / 'davao_bounding_box_road_network.geojson'
+dem_path = Path(__file__).parent.parent / 'dem'
 
 # Create a transformer to convert from WGS 84 (EPSG:4326) to Web Mercator (EPSG:3857)
 transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
-# Function to get elevation and flood depth at given coordinates
-def get_values(lon, lat):
+# Function to get elevation at given coordinates
+def get_elevation(lon, lat):
     elevation = None
-    flood_depth = None
-
-    logging.info(f"Getting values for coordinates: ({lon}, {lat})")
 
     # Retrieve elevation
     with rasterio.open(dem_path) as dem_src:
@@ -37,59 +33,32 @@ def get_values(lon, lat):
         # Check if the indices are within bounds for DEM
         if 0 <= row < dem_array.shape[0] and 0 <= col < dem_array.shape[1]:
             elevation = dem_array[row, col]
-            logging.info(f"Elevation found: {elevation}")
-        else:
-            logging.warning(f"Row {row} and column {col} out of bounds for DEM.")
 
-    # Retrieve flood depth
-    with rasterio.open(flood_depth_path) as flood_src:
-        flood_array = flood_src.read(1)
-        flood_transform = flood_src.transform
-        # Transform longitude and latitude to row and column
-        row, col = ~flood_transform * (lon, lat)
-
-        # Convert row and col to integers
-        row = int(row)
-        col = int(col)
-
-        # Check if the indices are within bounds for flood array
-        if 0 <= row < flood_array.shape[0] and 0 <= col < flood_array.shape[1]:
-            flood_depth = flood_array[row, col]
-            logging.info(f"Flood depth found: {flood_depth}")
-        else:
-            logging.warning(f"Row {row} and column {col} out of bounds for flood depth.")
-
-    return elevation, flood_depth
+    return elevation
 
 # Load the GeoJSON data
-logging.info(f"Loading GeoJSON data from {geojson_path}...")
 with open(geojson_path, 'r') as f:
     geojson_data = json.load(f)
 
 # List to hold updated features
 updated_features = []
 
-# Process each feature in the GeoJSON
-logging.info("Processing features in GeoJSON...")
-for feature in geojson_data['features']:
+# Process each feature in the GeoJSON with tqdm for progress tracking
+for feature in tqdm(geojson_data['features'], desc="Processing features"):
     # Extract coordinates from the feature
     coords = feature['geometry']['coordinates']
     if feature['geometry']['type'] == 'LineString':
-        # Check elevation and flood depth at each point in the LineString
+        # Check elevation at each point in the LineString
         elevations = []
-        flood_depths = []
-        logging.info(f"Processing LineString with {len(coords)} coordinates.")
         for coord in coords:
             lon, lat = coord  # (longitude, latitude)
             # Transform coordinates to Web Mercator
             lon_3857, lat_3857 = transformer.transform(lon, lat)
-            elevation, flood_depth = get_values(lon_3857, lat_3857)
+            elevation = get_elevation(lon_3857, lat_3857)
             elevations.append(elevation)
-            flood_depths.append(flood_depth)
         
-        # Add elevation and flood depth data to the properties
+        # Add elevation data to the properties
         feature['properties']['elevations'] = elevations
-        feature['properties']['flood_depths'] = flood_depths
 
     # Add updated feature to the list
     updated_features.append(feature)
@@ -101,9 +70,6 @@ updated_geojson = {
 }
 
 # Save the updated GeoJSON to a new file
-updated_geojson_path = 'updated_roads.geojson'
-logging.info(f"Saving updated GeoJSON to {updated_geojson_path}...")
+updated_geojson_path = 'roads_with_elevation.geojson'
 with open(updated_geojson_path, 'w') as f:
     json.dump(updated_geojson, f)
-
-logging.info(f"Updated GeoJSON saved to {updated_geojson_path}.")

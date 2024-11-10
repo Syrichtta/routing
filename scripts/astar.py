@@ -139,9 +139,9 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    node1 = random.choice(nodes)
+    # node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
-    # node1 = (125.6023788, 7.063822)
+    node1 = (125.5769377, 7.0538513)
     node2 = (125.6024582, 7.0766550)
     # (125.5657858, 7.1161489), # Manila Memorial Park
     # (125.5794607, 7.0664451), # Shrine Hills
@@ -183,7 +183,7 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
 
 
 # Main logic to load the GeoJSON and run A*
-geojson_file = 'davao_bounding_box_road_network.geojson'
+geojson_file = 'roads_with_elevation.geojson'
 output_html = 'shortest_path_map.html'
 
 # Average walking speed in meters per second (adjust this as needed)
@@ -207,9 +207,9 @@ try:
     computation_time = end_time - start_time
     print(f"Shortest path computed in {computation_time:.4f} seconds")
 
-    # print("Best path found (list of nodes):")
-    # for node in shortest_path:
-    #     print(node)
+    print("Best path found (list of nodes):")
+    for node in shortest_path:
+        print(f"{node},")
 
     # Calculate metrics
     total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(shortest_path, G, speed_mps)

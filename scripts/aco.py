@@ -169,7 +169,7 @@ G = build_graph(geojson_data)
 # Define start and end nodes (longitude, latitude)
 # Start node: (125.6217581, 7.0680991), End node: (125.6188844, 7.0671599)
 start_node = (125.6217581, 7.0680991) 
-end_node = (125.6188844, 7.0671599)  
+end_node = (125.5794607, 7.0664451) 
 
 start_time = time.time()
 best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node)
