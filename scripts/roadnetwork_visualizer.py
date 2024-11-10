@@ -4,7 +4,7 @@ from pathlib import Path
 
 # Load the GeoJSON file
 # input_file = "/home/syrichta/routing/davao_road_network.geojson"
-input_file = Path(__file__).parent.parent / "appended_edges.geojson"
+input_file = Path(__file__).parent.parent / "davao_bounding_box_road_network.geojson"
 print(f"Loading data from {input_file}...")
 gdf = gpd.read_file(input_file)
 print("Data loaded successfully.")

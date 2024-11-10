@@ -142,8 +142,10 @@ def select_connected_nodes(G):
     node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
     # node1 = (125.6023788, 7.063822)
-    node2 = (125.579685, 7.0656892)  
-    # shrine hills: (125.5779316, 7.0707941)  
+    node2 = (125.6024582, 7.0766550)
+    # (125.5657858, 7.1161489), # Manila Memorial Park
+    # (125.5794607, 7.0664451), # Shrine Hills
+    # (125.6024582, 7.0766550), # Rizal Memorial Colleges
 
     # Ensure the nodes are connected
     # while not nx.has_path(G, node1, node2):
@@ -181,7 +183,7 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
 
 
 # Main logic to load the GeoJSON and run A*
-geojson_file = 'updated_roads.geojson'
+geojson_file = 'davao_bounding_box_road_network.geojson'
 output_html = 'shortest_path_map.html'
 
 # Average walking speed in meters per second (adjust this as needed)

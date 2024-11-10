@@ -1,34 +1,28 @@
-import geopandas as gpd
+import json
+import folium
 import networkx as nx
 from geopy.distance import geodesic
-import folium
 from pathlib import Path
-import json
 
-# Build the graph from GeoJSON
+# Build the graph from GeoJSON without elevations and flood depths
 def build_graph(geojson_data):
     G = nx.Graph()
-
     for feature in geojson_data['features']:
         coordinates = feature['geometry']['coordinates']
-        elevations = feature['properties'].get('elevations', [0] * len(coordinates))
-        flood_depths = feature['properties'].get('flood_depths', [0] * len(coordinates))
 
         for i in range(len(coordinates) - 1):
             # Define nodes and add to the graph
             node1 = tuple(coordinates[i])
-            node2 = tuple(coordinates[i+1])
+            node2 = tuple(coordinates[i + 1])
 
             # Calculate distance between the two nodes as the edge weight
-            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i+1][1], coordinates[i+1][0])).meters
-
-            # Add edge with distance weight and store elevation/flood depth data
-            G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i+1]), flood_depths=(flood_depths[i], flood_depths[i+1]))
+            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i + 1][1], coordinates[i + 1][0])).meters
+            G.add_edge(node1, node2, weight=dist, distance=dist)
 
     return G
 
 # Load the GeoJSON data
-input_file = Path(__file__).parent.parent / "davao_specific_barangays_road_network.geojson"
+input_file = Path(__file__).parent.parent / "davao_bounding_box_road_network.geojson"
 print(f"Loading data from {input_file}...")
 with open(input_file) as f:
     geojson_data = json.load(f)
@@ -54,7 +48,7 @@ for node in G.nodes:
         fill=True,
         fill_color="red",
         fill_opacity=0.6
-    ).add_to(m).add_child(folium.Popup(f"Coordinates: ({node[0]:.6f}, {node[1]:.6f})"))
+    ).add_to(m).add_child(folium.Popup(f"Coordinates: ({node[0]:.8f}, {node[1]:.8f})"))
 
 # Save the map as an HTML file
 output_file = Path(__file__).parent / "davao_road_network_nodes_on_click.html"
