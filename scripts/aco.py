@@ -12,11 +12,11 @@ import folium  # Make sure to install folium for visualization
 logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO parameters
-num_ants = 100
+num_ants = 10
 num_iterations = 10
-alpha = 5.0        # Pheromone importance
-beta = 1.0         # Heuristic importance
-evaporation_rate = 0.5
+alpha = 1.0        # Pheromone importance
+beta = 2.0         # Heuristic importance
+evaporation_rate = 0.3
 pheromone_constant = 100.0
 
 # Load GeoJSON data
@@ -159,7 +159,7 @@ def visualize_paths(G, all_paths, start_node, end_node, output_html='aco_paths_m
     print(f"Network and all paths visualized and saved to {output_html}")
 
 # Main script
-geojson_file = 'updated_roads.geojson'
+geojson_file = 'roads_with_elevation_and_flood.geojson'
 output_html = 'aco_path_map.html'
 
 # Load GeoJSON and build graph
@@ -168,8 +168,8 @@ G = build_graph(geojson_data)
 
 # Define start and end nodes (longitude, latitude)
 # Start node: (125.6217581, 7.0680991), End node: (125.6188844, 7.0671599)
-start_node = (125.6217581, 7.0680991) 
-end_node = (125.5794607, 7.0664451) 
+start_node = (125.6015325, 7.0647666) 
+end_node = (125.6024582, 7.0766550)
 
 start_time = time.time()
 best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node)

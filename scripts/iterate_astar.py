@@ -180,7 +180,7 @@ def select_connected_nodes(G):
     nodes = list(G.nodes)
     # node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
-    node1 = (125.5769377, 7.0538513)
+    node1 = (125.6015325, 7.0647666) 
     node2 = (125.6024582, 7.0766550)
     # (125.5657858, 7.1161489), # Manila Memorial Park
     # (125.5794607, 7.0664451), # Shrine Hills

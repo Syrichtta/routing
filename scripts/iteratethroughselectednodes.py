@@ -117,40 +117,57 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
         distance = slope = inundation = 0
     return alpha * (distance + h_n) + beta * distance + gamma * slope + delta * inundation
 
-def find_and_store_paths_from_txt(G, speed_mps, coordinates_file, output_csv):
-    destinations = [
+
+def find_and_store_paths_from_txt(G, speed_mps, coordinates_file, output_json):
+    end_nodes = [
         (125.5657858, 7.1161489),  # Example destination
         (125.5794607, 7.0664451),
         (125.6024582, 7.0766550)
     ]
     start_nodes = load_coordinates_from_txt(coordinates_file)
-    with open(output_csv, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=['start_node', 'destination', 'total_distance', 'travel_time', 'elevation_gain', 'elevation_loss', 'max_flood_depth', 'path'])
-        writer.writeheader()
-        for start_node in start_nodes:
-            for dest_node in destinations:
-                try:
-                    path = nx.astar_path(G, source=start_node, target=dest_node, heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, 0.2, 0.25, 0.2, 0.1, 0.25))
-                    total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(path, G, speed_mps)
-                    writer.writerow({
-                        'start_node': start_node,
-                        'destination': dest_node,
-                        'total_distance': f"{total_distance:.2f}",
-                        'travel_time': f"{travel_time:.2f}",
-                        'elevation_gain': f"{total_gain:.2f}",
-                        'elevation_loss': f"{total_loss:.2f}",
-                        'max_flood_depth': f"{max_flood_depth:.4f}",
-                        'path': json.dumps(path)
-                    })
-                except nx.NetworkXNoPath:
-                    print(f"No path found between {start_node} and {dest_node}")
+    
+    # Create a dictionary to store the data with start and end nodes as string keys
+    path_data = {}
+    
+    # Use tqdm to wrap the iteration over start nodes
+    for start_node in tqdm(start_nodes, desc="Processing start nodes", unit="node"):
+        for end_node in end_nodes:
+            try:
+                # Find the shortest path using A* algorithm
+                path = nx.astar_path(G, source=start_node, target=end_node, heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, 0.2, 0.25, 0.2, 0.1, 0.25))
+                
+                # Calculate the metrics for the path
+                total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(path, G, speed_mps)
+                
+                # Convert the start and end nodes to strings to use as dictionary keys
+                start_str = f"{start_node[0]:.7f},{start_node[1]:.7f}"
+                end_str = f"{end_node[0]:.7f},{end_node[1]:.7f}"
+
+                # Store the path data under the combined start and end node keys
+                path_data[f"{start_str} -> {end_str}"] = {
+                    'total_distance': f"{total_distance:.2f}",
+                    'travel_time': f"{travel_time:.2f}",
+                    'elevation_gain': f"{total_gain:.2f}",
+                    'elevation_loss': f"{total_loss:.2f}",
+                    'max_flood_depth': f"{max_flood_depth:.4f}",
+                    # Store path as a list of tuples (rounded to 7 decimal places)
+                    'path': [(round(coord[0], 7), round(coord[1], 7)) for coord in path]  
+                }
+            except nx.NetworkXNoPath:
+                print(f"No path found between {start_node} and {end_node}")
+    
+    # Write the collected data to a JSON file
+    with open(output_json, 'w') as jsonfile:
+        json.dump(path_data, jsonfile, indent=4)
+
+
 
 # Main execution
 if __name__ == "__main__":
     geojson_file = 'roads_with_elevation.geojson'
     flood_raster_path = 'davaoFloodMap11_11_24_SRI30.tif'
     coordinates_file = 'selected_nodes.txt'
-    output_csv = 'shortest_paths_from_txt.csv'
+    output_json = 'shortest_paths_from_txt.json'
     speed_mps = 1.4
 
     print("Loading GeoJSON and building graph...")
@@ -159,7 +176,7 @@ if __name__ == "__main__":
 
     print("Finding shortest paths for nodes from txt file...")
     start_time = time.time()
-    find_and_store_paths_from_txt(G, speed_mps, coordinates_file, output_csv)
+    find_and_store_paths_from_txt(G, speed_mps, coordinates_file, output_json)
     end_time = time.time()
 
     print(f"Computation completed in {end_time - start_time:.2f} seconds")

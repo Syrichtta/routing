@@ -8,13 +8,15 @@ from geopy.distance import geodesic
 from tqdm import tqdm
 import folium  # Make sure to install folium for visualization
 import heapq  # For implementing A* algorithm
+from pyproj import Transformer
+import rasterio
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
+logging.basicConfig(level=logging.CRITICAL, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO parameters
-num_ants = 100
-num_iterations = 1
+num_ants = 10
+num_iterations = 10
 alpha = 5.0        # Pheromone importance
 beta = 1.0         # Heuristic importance
 evaporation_rate = 0.5
@@ -26,6 +28,29 @@ def load_geojson(file_path):
         return json.load(f)
 
 # Build the graph from GeoJSON
+def get_flood_depth(lon, lat, flood_raster_path):
+    """Get flood depth at given coordinates from flood depth raster."""
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    
+    try:
+        with rasterio.open(flood_raster_path) as src:
+            # Transform coordinates to Web Mercator
+            lon_3857, lat_3857 = transformer.transform(lon, lat)
+            
+            # Get row, col indices
+            row, col = ~src.transform * (lon_3857, lat_3857)
+            row, col = int(row), int(col)
+            
+            # Check if indices are within bounds
+            if 0 <= row < src.height and 0 <= col < src.width:
+                depth = src.read(1)[row, col]
+                # Handle nodata values
+                return 0 if depth == src.nodata else depth
+    except Exception as e:
+        print(f"Warning: Error reading flood depth at {lon}, {lat}: {e}")
+    
+    return 0
+
 def build_graph(geojson_data):
     G = nx.Graph()
 
@@ -199,10 +224,11 @@ def visualize_paths(G, all_paths, start_node, end_node, output_html='aco_paths_m
 
 # Main script execution
 if __name__ == "__main__":
-    geojson_file = 'updated_roads.geojson'  # Replace with your GeoJSON file path
-    start_node = (125.6217581, 7.0680991)  # Starting coordinates
-    end_node = (125.6188844, 7.0671599)  # Ending coordinates
-    output_html = 'aco_paths_map.html'
+    geojson_file = 'roads_with_elevation.geojson'  # Replace with your GeoJSON file path
+    flood_raster_path = 'davaoFloodMap11_11_24_SRI30.tif'
+    start_node = (125.6015325, 7.0647666)  # Starting coordinates
+    end_node = (125.6024582, 7.0766550)  # Ending coordinates
+    output_html = 'astar_aco_paths_map.html'
 
     # Load data and build the graph
     geojson_data = load_geojson(geojson_file)
@@ -213,41 +239,62 @@ if __name__ == "__main__":
     for edge in G.edges():
         pheromone_levels[tuple(sorted(edge))] = 1.0  # Initial pheromone level
 
-    # Run A* algorithm to find the initial best path
-    best_path, best_path_length = astar(G, start_node, end_node)
+    # # Run A* algorithm to find the initial best path
+    # best_path, best_path_length = astar(G, start_node, end_node)
 
     # Define the initial best path
     initial_best_path = [
-        (125.6217581, 7.0680991),
-        (125.6217711, 7.0681008),
-        (125.6217671, 7.0680842),
-        (125.6217424, 7.0680265),
-        (125.6217304, 7.0679912),
-        (125.621711, 7.0679598),
-        (125.6216923, 7.0679295),
-        (125.6216519, 7.0678526),
-        (125.6216057, 7.0677893),
-        (125.6215658, 7.0677247),
-        (125.6210472, 7.0679187),
-        (125.6208534, 7.0679878),
-        (125.6207022, 7.0675846),
-        (125.6205109, 7.0676591),
-        (125.6203098, 7.0677375),
-        (125.620115, 7.0678135),
-        (125.619957, 7.0674275),
-        (125.6197762, 7.0674967),
-        (125.6195992, 7.0675696),
-        (125.6193847, 7.0676513),
-        (125.6193492, 7.0675539),
-        (125.6192407, 7.0673385),
-        (125.6192072, 7.067275),
-        (125.6190073, 7.0673746),
-        (125.6188844, 7.0671599)
+        (125.6015325, 7.0647666),
+        (125.6015883, 7.0650632),
+        (125.6018902, 7.0665857),
+        (125.6019752, 7.0669411),
+        (125.6020265, 7.0671295),
+        (125.6021154, 7.0673791),
+        (125.6021829, 7.0675542),
+        (125.6022438, 7.0676806),
+        (125.6023127, 7.0678194),
+        (125.6023757, 7.0679197),
+        (125.6024377, 7.0680005),
+        (125.60252, 7.0680908),
+        (125.6027502, 7.0682837),
+        (125.6032125, 7.0686836),
+        (125.6034827, 7.0689173),
+        (125.6041372, 7.0694524),
+        (125.6045038, 7.0697522),
+        (125.6048012, 7.0699953),
+        (125.604844, 7.0700303),
+        (125.6048536, 7.0701051),
+        (125.6048775, 7.0702905),
+        (125.6049015, 7.0704764),
+        (125.6049277, 7.0706797),
+        (125.6049573, 7.0709099),
+        (125.6050447, 7.0715901),
+        (125.6050815, 7.0718762),
+        (125.6051541, 7.0723902),
+        (125.6051718, 7.0725155),
+        (125.6051928, 7.0726641),
+        (125.6051998, 7.0727191),
+        (125.605227, 7.0730088),
+        (125.6052502, 7.0732124),
+        (125.6052062, 7.073266),
+        (125.6049846, 7.073536),
+        (125.6049202, 7.0736145),
+        (125.6045904, 7.0740163),
+        (125.6043522, 7.0743064),
+        (125.6040902, 7.0746202),
+        (125.6040195, 7.0747048),
+        (125.6036306, 7.0751707),
+        (125.6033365, 7.0755381),
+        (125.6032835, 7.0756043),
+        (125.6032472, 7.0756488),
+        (125.6026112, 7.0764263),
+        (125.6025067, 7.0765793),
+        (125.6024582, 7.076655)
     ]
 
-    # Update pheromones with the initial best path
-    if best_path:
-        update_pheromones_with_initial_best_path(G, pheromone_levels, initial_best_path)
+    # # Update pheromones with the initial best path
+    # if best_path:
+    update_pheromones_with_initial_best_path(G, pheromone_levels, initial_best_path)
 
     # Run the Ant Colony Optimization
     best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node, pheromone_levels)
