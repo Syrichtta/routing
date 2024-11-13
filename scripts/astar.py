@@ -4,6 +4,9 @@ import folium
 import random
 from geopy.distance import geodesic
 import time
+from pyproj import Transformer
+import rasterio
+from tqdm import tqdm
 
 # Load GeoJSON data
 def load_geojson(file_path):
@@ -11,13 +14,42 @@ def load_geojson(file_path):
         return json.load(f)
 
 # Build the graph from GeoJSON
-def build_graph(geojson_data):
+def get_flood_depth(lon, lat, flood_raster_path):
+    """Get flood depth at given coordinates from flood depth raster."""
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    
+    try:
+        with rasterio.open(flood_raster_path) as src:
+            # Transform coordinates to Web Mercator
+            lon_3857, lat_3857 = transformer.transform(lon, lat)
+            
+            # Get row, col indices
+            row, col = ~src.transform * (lon_3857, lat_3857)
+            row, col = int(row), int(col)
+            
+            # Check if indices are within bounds
+            if 0 <= row < src.height and 0 <= col < src.width:
+                depth = src.read(1)[row, col]
+                # Handle nodata values
+                return 0 if depth == src.nodata else depth
+    except Exception as e:
+        print(f"Warning: Error reading flood depth at {lon}, {lat}: {e}")
+    
+    return 0
+
+def build_graph(geojson_data, flood_raster_path):
+    """Build graph from GeoJSON with flood depths from raster."""
     G = nx.Graph()
 
-    for feature in geojson_data['features']:
+    for feature in tqdm(geojson_data['features'], desc="Building graph from GeoJSON"):  # Add tqdm for progress bar
         coordinates = feature['geometry']['coordinates']
         elevations = feature['properties'].get('elevations', [0] * len(coordinates))
-        flood_depths = feature['properties'].get('flood_depths', [0] * len(coordinates))
+        
+        # Get flood depths for each coordinate
+        flood_depths = []
+        for coord in coordinates:
+            depth = get_flood_depth(coord[0], coord[1], flood_raster_path)
+            flood_depths.append(depth)
 
         for i in range(len(coordinates) - 1):
             # Define nodes and add to the graph
@@ -25,12 +57,18 @@ def build_graph(geojson_data):
             node2 = tuple(coordinates[i+1])
 
             # Calculate distance between the two nodes as the edge weight
-            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i+1][1], coordinates[i+1][0])).meters
+            dist = geodesic((coordinates[i][1], coordinates[i][0]), 
+                          (coordinates[i+1][1], coordinates[i+1][0])).meters
 
-            # Add edge with distance weight and store elevation/flood depth data
-            G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i+1]), flood_depths=(flood_depths[i], flood_depths[i+1]))
+            # Add edge with all attributes
+            G.add_edge(node1, node2, 
+                      weight=dist,
+                      distance=dist,
+                      elevations=(elevations[i], elevations[i+1]),
+                      flood_depths=(flood_depths[i], flood_depths[i+1]))
 
     return G
+
 
 # Calculate elevation gain/loss, maximum flood depth, and total distance
 def calculate_metrics(path, G, speed_mps):
@@ -141,7 +179,7 @@ def select_connected_nodes(G):
     nodes = list(G.nodes)
     # node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
-    node1 = (125.5769377, 7.0538513)
+    node1 = (125.5561781, 7.0990242)
     node2 = (125.6024582, 7.0766550)
     # (125.5657858, 7.1161489), # Manila Memorial Park
     # (125.5794607, 7.0664451), # Shrine Hills
@@ -184,6 +222,7 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
 
 # Main logic to load the GeoJSON and run A*
 geojson_file = 'roads_with_elevation.geojson'
+flood_raster_path = 'davaoFloodMap11_11_24_SRI30.tif'  
 output_html = 'shortest_path_map.html'
 
 # Average walking speed in meters per second (adjust this as needed)
@@ -191,7 +230,7 @@ speed_mps = 1.4
 
 # Load the GeoJSON and build the graph
 geojson_data = load_geojson(geojson_file)
-G = build_graph(geojson_data)
+G = build_graph(geojson_data, flood_raster_path)  
 
 # Select two random connected nodes
 start_node, end_node = select_connected_nodes(G)
