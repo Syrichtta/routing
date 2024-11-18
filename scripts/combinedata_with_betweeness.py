@@ -1,4 +1,5 @@
 import json
+import networkx as nx
 import rasterio
 from pyproj import Transformer
 import logging
@@ -58,6 +59,30 @@ def get_flood_depth(lon, lat):
 
     return flood_depth
 
+# Function to build a graph for betweenness centrality calculation
+def build_graph_for_betweenness(geojson_data):
+    G = nx.Graph()
+
+    for feature in geojson_data['features']:
+        if feature['geometry']['type'] == 'LineString':
+            coordinates = feature['geometry']['coordinates']
+            
+            # Add edges between consecutive coordinates
+            for i in range(len(coordinates) - 1):
+                node1 = tuple(coordinates[i])
+                node2 = tuple(coordinates[i + 1])
+                
+                # Calculate distance (you might want to use geodesic distance)
+                from math import sqrt
+                distance = sqrt(
+                    (coordinates[i][0] - coordinates[i+1][0])**2 + 
+                    (coordinates[i][1] - coordinates[i+1][1])**2
+                )
+                
+                G.add_edge(node1, node2, weight=distance)
+
+    return G
+
 # Load the GeoJSON data
 with open(geojson_path, 'r') as f:
     geojson_data = json.load(f)
@@ -89,6 +114,23 @@ for feature in tqdm(geojson_data['features'], desc="Processing features"):
     # Add updated feature to the list
     updated_features.append(feature)
 
+# Rebuild the graph for betweenness calculation
+G = build_graph_for_betweenness({'features': updated_features})
+
+# Calculate betweenness centrality for each node
+print("Calculating betweenness centrality...")
+betweenness = nx.betweenness_centrality(G, weight='weight')
+
+# Normalize betweenness centrality
+max_b = max(betweenness.values())
+betweenness = {node: value / max_b for node, value in betweenness.items()}
+
+# Add betweenness to feature properties
+for feature in updated_features:
+    coords = feature['geometry']['coordinates']
+    feature_betweenness = [betweenness.get(tuple(coord), 0) for coord in coords]
+    feature['properties']['betweenness_centrality'] = feature_betweenness
+
 # Create a new GeoJSON structure with updated features
 updated_geojson = {
     'type': 'FeatureCollection',
@@ -96,8 +138,8 @@ updated_geojson = {
 }
 
 # Save the updated GeoJSON to a new file
-updated_geojson_path = 'roads_with_elevation_and_flood.geojson'
+updated_geojson_path = 'roads_with_elevation_flood_betweenness.geojson'
 with open(updated_geojson_path, 'w') as f:
     json.dump(updated_geojson, f)
 
-print(f"Updated GeoJSON with elevation and flood data saved to {updated_geojson_path}")
+print(f"Updated GeoJSON with elevation, flood, and betweenness data saved to {updated_geojson_path}")

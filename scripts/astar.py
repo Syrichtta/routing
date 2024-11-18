@@ -144,10 +144,12 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    # node1 = random.choice(nodes)
-    # node2 = random.choice(nodes)
     node1 = (125.6015325, 7.0647666)
     node2 = (125.6024582, 7.0766550)
+
+    # node1 = random.choice(nodes)
+    # node2 = random.choice(nodes)
+
     # (125.5657858, 7.1161489), # Manila Memorial Park
     # (125.5794607, 7.0664451), # Shrine Hills
     # (125.6024582, 7.0766550), # Rizal Memorial Colleges
@@ -158,33 +160,28 @@ def select_connected_nodes(G):
 
     return node1, node2
 
-# # Heuristic function for A*
-# def heuristic(node1, node2):
-#     # Calculate the straight-line distance between the two nodes
-#     return geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
 
-# New heuristic function
-def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
-    # Calculate the straight-line distance as part of the heuristic
+def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta):
+    # Calculate the straight-line distance (h(n))
     h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
-
-    # Initialize metrics
-    distance = 0  # Initialize distance to 0
-    slope = 0     # Initialize slope to 0
-    inundation = 0 # Initialize inundation to 0
-
+    
+    # Get g(n): cost from start node to current node
+    g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
+    
+    # Get b'(n): inverse betweenness centrality
+    b_prime = G.nodes[node1]['b_prime']
+    
+    # Get i(n) and j(n): distance and slope parameters
     if G.has_edge(node1, node2):
-        distance = G[node1][node2]['distance']  # Get distance if edge exists
-        slope = calculate_slope(node1, node2, G)  # Calculate slope based on elevation
-        inundation = G[node1][node2]['flood_depths'][1] if G.has_edge(node1, node2) else 0  # Define how to get inundation
-
-    # Compute total cost with the new weights
-    f_n = (alpha * (distance + h_n) +
-           beta * (distance) +   # Adjust as needed
-           gamma * (slope) +     # Adjust as needed
-           delta * (inundation))  # Adjust as needed
-
+        distance = G[node1][node2]['distance']
+        slope = calculate_slope(node1, node2, G)
+    else:
+        distance, slope = 0, 0
+    
+    # Compute total cost
+    f_n = (alpha * (g_n + h_n)) + (beta * b_prime) + (gamma * distance) + (delta * slope)
     return f_n
+
 
 
 # Main logic to load the GeoJSON and run A*
@@ -199,16 +196,41 @@ speed_mps = 1.4
 geojson_data = load_geojson(geojson_file)
 G = build_graph(geojson_data)  
 
+
 # Select two random connected nodes
 start_node, end_node = select_connected_nodes(G)
 print(f"Start node: {start_node}, End node: {end_node}")
+
+betweenness = {}
+nodes = list(G.nodes)
+print("Calculating betweenness centrality...")
+for node in tqdm(nodes, desc="Processing nodes"):
+    betweenness[node] = sum(
+        nx.single_source_dijkstra_path_length(G, node, weight='distance').values()
+    )
+
+# Normalize betweenness centrality
+max_b = max(betweenness.values())
+betweenness = {node: value / max_b for node, value in betweenness.items()}
+
+
+print("Adding inverse betweenness centrality to graph nodes...")
+for node in tqdm(G.nodes, desc="Processing nodes"):
+    G.nodes[node]['b_prime'] = max_b - betweenness[node]
 
 # Measure computation time for A* algorithm
 start_time = time.time()
 
 try:
     # Update A* call with the new heuristic
-    shortest_path = nx.astar_path(G, source=start_node, target=end_node, heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, 0.2, 0.25, 0.2, 0.1, 0.25))
+    shortest_path = nx.astar_path(
+    G, 
+    source=start_node, 
+    target=end_node, 
+    heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1), 
+    weight='distance'
+)
+
     end_time = time.time()
     computation_time = end_time - start_time
     print(f"Shortest path computed in {computation_time:.4f} seconds")
@@ -219,6 +241,8 @@ try:
 
     # Calculate metrics
     total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(shortest_path, G, speed_mps)
+
+    
     
     # Visualize the path
     visualize_path(geojson_data, shortest_path, output_html, total_gain, total_loss, max_flood_depth, total_distance, travel_time, start_node, end_node)
