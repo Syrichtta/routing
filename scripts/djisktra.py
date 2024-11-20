@@ -149,6 +149,7 @@ try:
     end_time = time.time()
     computation_time = end_time - start_time
     print(f"Shortest path computed in {computation_time:.4f} seconds")
+    print(shortest_path)
 
     total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(shortest_path, G, speed_mps)
 
