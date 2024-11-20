@@ -6,21 +6,73 @@ import time
 import logging
 from geopy.distance import geodesic
 from tqdm import tqdm
-import folium  # Make sure to install folium for visualization
-import heapq  # For implementing A* algorithm
-from pyproj import Transformer
-import rasterio
+import folium
 
 # Configure logging
-logging.basicConfig(level=logging.CRITICAL, filename="aco_log.txt", filemode="w", format="%(message)s")
+logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO parameters
 num_ants = 10
 num_iterations = 10
-alpha = 5.0        # Pheromone importance
-beta = 1.0         # Heuristic importance
-evaporation_rate = 0.5
+alpha = 1.0        # Pheromone importance
+beta = 2.0         # Heuristic importance
+evaporation_rate = 0.3
 pheromone_constant = 100.0
+
+# Function to calculate slope (from A* script)
+def calculate_slope(node1, node2, G):
+    if G.has_edge(node1, node2):
+        edge_data = G[node1][node2]
+        elevation1 = edge_data['elevations'][0]  # Elevation of node1
+        elevation2 = edge_data['elevations'][1]  # Elevation of node2
+        horizontal_distance = edge_data['distance']  # Horizontal distance between nodes
+
+        # Calculate the change in elevation
+        elevation_change = elevation2 - elevation1
+
+        # Calculate slope (rise/run)
+        if horizontal_distance > 0:  # Prevent division by zero
+            slope = elevation_change / horizontal_distance
+        else:
+            slope = 0
+
+        return slope
+    else:
+        return 0  # Return 0 if no edge exists
+
+# Heuristic function from A* script (extended version)
+def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7):
+    # Calculate the straight-line distance (h(n))
+    h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
+
+    # Get g(n): cost from start node to current node (assuming a distance weight)
+    try:
+        g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
+    except nx.NetworkXNoPath:
+        g_n = float('inf')  # Handle no-path case
+
+    # Get b'(n): inverse betweenness centrality
+    b_prime = G.nodes[node1].get('b_prime', 0)
+
+    # Initialize metrics
+    distance, slope, flood_depth = 0, 0, 0
+
+    # Get edge data if edge exists
+    edge_data = G.get_edge_data(node1, node2)
+    if edge_data:
+        distance = edge_data.get('distance', 0)
+        slope = calculate_slope(node1, node2, G)
+        flood_depth = max(edge_data.get('flood_depths', [0]))
+
+    # Compute total cost (including flood depth as a penalty)
+    f_n = (
+        alpha * (g_n + h_n) +
+        beta * b_prime +
+        gamma * distance +
+        delta * slope +
+        epsilon * flood_depth
+    )
+    return f_n
 
 # Load GeoJSON data
 def load_geojson(file_path):
@@ -28,29 +80,6 @@ def load_geojson(file_path):
         return json.load(f)
 
 # Build the graph from GeoJSON
-def get_flood_depth(lon, lat, flood_raster_path):
-    """Get flood depth at given coordinates from flood depth raster."""
-    transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-    
-    try:
-        with rasterio.open(flood_raster_path) as src:
-            # Transform coordinates to Web Mercator
-            lon_3857, lat_3857 = transformer.transform(lon, lat)
-            
-            # Get row, col indices
-            row, col = ~src.transform * (lon_3857, lat_3857)
-            row, col = int(row), int(col)
-            
-            # Check if indices are within bounds
-            if 0 <= row < src.height and 0 <= col < src.width:
-                depth = src.read(1)[row, col]
-                # Handle nodata values
-                return 0 if depth == src.nodata else depth
-    except Exception as e:
-        print(f"Warning: Error reading flood depth at {lon}, {lat}: {e}")
-    
-    return 0
-
 def build_graph(geojson_data):
     G = nx.Graph()
 
@@ -68,36 +97,8 @@ def build_graph(geojson_data):
 
     return G
 
-def coordinates_equal(coord1, coord2, tolerance=0.5):
-    return geodesic((coord1[1], coord1[0]), (coord2[1], coord2[0])).meters < tolerance
-
-# A* algorithm implementation
-def astar(G, start_node, end_node):
-    # Priority queue to store (cost, current_node, path)
-    queue = [(0, start_node, [])]
-    visited = set()
-
-    while queue:
-        cost, current_node, path = heapq.heappop(queue)
-        path = path + [current_node]
-
-        if coordinates_equal(current_node, end_node):
-            return path, cost  # Return the path and cost if the end node is reached
-
-        if current_node in visited:
-            continue
-
-        visited.add(current_node)
-
-        for neighbor in G.neighbors(current_node):
-            edge_data = G[current_node][neighbor]
-            distance = edge_data['distance']
-            heuristic = geodesic((neighbor[1], neighbor[0]), (end_node[1], end_node[0])).meters  # Heuristic: distance to the end node
-            heapq.heappush(queue, (cost + distance + heuristic, neighbor, path))
-
-    return None, float('inf')  # Return None if no path is found
-
-def ant_colony_optimization(G, start_node, end_node, pheromone_levels):
+def ant_colony_optimization(G, start_node, end_node):
+    pheromone_levels = {tuple(sorted(edge)): 1.0 for edge in G.edges()}
     best_path = None
     best_path_length = float('inf')
     path_found = False  # Track if any valid path reaches the end node
@@ -123,7 +124,7 @@ def ant_colony_optimization(G, start_node, end_node, pheromone_levels):
                     path = list(stack)  # Successful path found
                     path_length = sum(G[stack[i]][stack[i + 1]]["distance"] for i in range(len(stack) - 1))
                     logging.info(f"Ant {ant + 1} completed path: {path} with length: {path_length:.2f}")
-
+                    
                     # Check if this is the best path
                     if path_length < best_path_length:
                         best_path = path
@@ -139,18 +140,34 @@ def ant_colony_optimization(G, start_node, end_node, pheromone_levels):
                 unvisited_neighbors = [n for n in neighbors if n not in visited]
 
                 if unvisited_neighbors:
-                    # Calculate desirability for unvisited neighbors
-                    desirability = []
-                    for neighbor in unvisited_neighbors:
-                        distance = G[current_node][neighbor]["distance"]
-                        edge = tuple(sorted((current_node, neighbor)))
-                        pheromone = pheromone_levels.get(edge, 1.0)
-                        desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
-
-                    # Select the next node based on probabilities
-                    desirability_sum = sum(desirability)
-                    probabilities = [d / desirability_sum for d in desirability]
-                    next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
+                    # Decide which heuristic to use based on random number
+                    random_choice = round(random.random(), 1)
+                    
+                    if random_choice > 0.5:
+                        # Use A* heuristic function to choose the next node
+                        desirability = []
+                        for neighbor in unvisited_neighbors:
+                            # Calculate heuristic value to the end node
+                            heuristic_value = heuristic_extended(neighbor, end_node, G)
+                            desirability.append(heuristic_value)
+                        
+                        # Select the next node with the lowest heuristic value
+                        next_node = unvisited_neighbors[desirability.index(min(desirability))]
+                        logging.info(f"Ant {ant + 1} uses A* heuristic to select node {next_node}")
+                    else:
+                        # Use original ACO heuristic
+                        desirability = []
+                        for neighbor in unvisited_neighbors:
+                            distance = G[current_node][neighbor]["distance"]
+                            edge = tuple(sorted((current_node, neighbor)))
+                            pheromone = pheromone_levels.get(edge, 1.0)
+                            desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
+                        
+                        # Select the next node based on probabilities
+                        desirability_sum = sum(desirability)
+                        probabilities = [d / desirability_sum for d in desirability]
+                        next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
+                        logging.info(f"Ant {ant + 1} uses ACO heuristic to select node {next_node}")
 
                     # Log the traversal step for this ant
                     logging.info(f"Ant {ant + 1} moves from {current_node} to {next_node}.")
@@ -186,21 +203,6 @@ def ant_colony_optimization(G, start_node, end_node, pheromone_levels):
 
     return best_path, best_path_length, all_paths  # Return all paths
 
-def update_pheromones_with_initial_best_path(G, pheromone_levels, initial_best_path):
-    pheromone_deposit = pheromone_constant / len(initial_best_path)  # You can adjust this as needed
-
-    # Loop through the edges in the initial best path and update the pheromone levels
-    for i in range(len(initial_best_path) - 1):
-        node1 = tuple(initial_best_path[i])
-        node2 = tuple(initial_best_path[i + 1])
-        edge = tuple(sorted((node1, node2)))
-
-        if edge in pheromone_levels:
-            pheromone_levels[edge] += pheromone_deposit
-            logging.info(f"Pheromone updated on edge {edge} from initial best path.")
-        else:
-            logging.warning(f"Edge {edge} not found in graph.")
-
 # Visualization of paths and the entire network
 def visualize_paths(G, all_paths, start_node, end_node, output_html='aco_paths_map.html'):
     # Create a base map
@@ -217,87 +219,39 @@ def visualize_paths(G, all_paths, start_node, end_node, output_html='aco_paths_m
 
     # Visualize all paths taken by the ants in red
     for path in all_paths:
-        folium.PolyLine(locations=[(lat, lon) for lat, lon in path], color='red', weight=3, opacity=0.6).add_to(base_map)
+        folium.PolyLine(locations=[(lat, lon) for lon, lat in path], color='red', weight=2.5, opacity=0.7).add_to(base_map)
 
     # Save the map to an HTML file
     base_map.save(output_html)
+    print(f"Network and all paths visualized and saved to {output_html}")
 
-# Main script execution
-if __name__ == "__main__":
-    geojson_file = 'roads_with_elevation.geojson'  # Replace with your GeoJSON file path
-    flood_raster_path = 'davaoFloodMap11_11_24_SRI30.tif'
-    start_node = (125.6015325, 7.0647666)  # Starting coordinates
-    end_node = (125.6024582, 7.0766550)  # Ending coordinates
-    output_html = 'astar_aco_paths_map.html'
+# Main script
+def main():
+    geojson_file = 'roads_with_elevation_and_flood.geojson'
+    output_html = 'aco_path_map.html'
 
-    # Load data and build the graph
+    # Load GeoJSON and build graph
     geojson_data = load_geojson(geojson_file)
     G = build_graph(geojson_data)
 
-    # Initialize pheromone levels
-    pheromone_levels = {}
-    for edge in G.edges():
-        pheromone_levels[tuple(sorted(edge))] = 1.0  # Initial pheromone level
+    # Define start and end nodes (longitude, latitude)
+    start_node = (125.6015325, 7.0647666) 
+    end_node = (125.6024582, 7.0766550)
 
-    # # Run A* algorithm to find the initial best path
-    # best_path, best_path_length = astar(G, start_node, end_node)
+    start_time = time.time()
+    best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node)
+    end_time = time.time()
 
-    # Define the initial best path
-    initial_best_path = [
-        (125.6015325, 7.0647666),
-        (125.6015883, 7.0650632),
-        (125.6018902, 7.0665857),
-        (125.6019752, 7.0669411),
-        (125.6020265, 7.0671295),
-        (125.6021154, 7.0673791),
-        (125.6021829, 7.0675542),
-        (125.6022438, 7.0676806),
-        (125.6023127, 7.0678194),
-        (125.6023757, 7.0679197),
-        (125.6024377, 7.0680005),
-        (125.60252, 7.0680908),
-        (125.6027502, 7.0682837),
-        (125.6032125, 7.0686836),
-        (125.6034827, 7.0689173),
-        (125.6041372, 7.0694524),
-        (125.6045038, 7.0697522),
-        (125.6048012, 7.0699953),
-        (125.604844, 7.0700303),
-        (125.6048536, 7.0701051),
-        (125.6048775, 7.0702905),
-        (125.6049015, 7.0704764),
-        (125.6049277, 7.0706797),
-        (125.6049573, 7.0709099),
-        (125.6050447, 7.0715901),
-        (125.6050815, 7.0718762),
-        (125.6051541, 7.0723902),
-        (125.6051718, 7.0725155),
-        (125.6051928, 7.0726641),
-        (125.6051998, 7.0727191),
-        (125.605227, 7.0730088),
-        (125.6052502, 7.0732124),
-        (125.6052062, 7.073266),
-        (125.6049846, 7.073536),
-        (125.6049202, 7.0736145),
-        (125.6045904, 7.0740163),
-        (125.6043522, 7.0743064),
-        (125.6040902, 7.0746202),
-        (125.6040195, 7.0747048),
-        (125.6036306, 7.0751707),
-        (125.6033365, 7.0755381),
-        (125.6032835, 7.0756043),
-        (125.6032472, 7.0756488),
-        (125.6026112, 7.0764263),
-        (125.6025067, 7.0765793),
-        (125.6024582, 7.076655)
-    ]
+    # Display results
+    if best_path:
+        print(f"ACO completed in {end_time - start_time:.2f} seconds")
+        print(f"Best path: {best_path}")
+        print(f"Best path length: {best_path_length:.2f} meters")
+    else:
+        print("ACO failed to find a path between the start and end nodes.")
 
-    # # Update pheromones with the initial best path
-    # if best_path:
-    update_pheromones_with_initial_best_path(G, pheromone_levels, initial_best_path)
+    # Call the visualization function
+    visualize_paths(G, all_paths, start_node, end_node)
 
-    # Run the Ant Colony Optimization
-    best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node, pheromone_levels)
-
-    # Visualize paths
-    visualize_paths(G, all_paths, start_node, end_node, output_html)
+if __name__ == "__main__":
+    main()

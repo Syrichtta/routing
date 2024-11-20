@@ -4,10 +4,16 @@ import folium
 import random
 from geopy.distance import geodesic
 import time
+from tqdm import tqdm
 
 # Load GeoJSON data
 def load_geojson(file_path):
     with open(file_path) as f:
+        return json.load(f)
+
+# Load betweenness centrality data from JSON
+def load_betweenness_from_json(json_file):
+    with open(json_file) as f:
         return json.load(f)
 
 # Build the graph from GeoJSON
@@ -21,15 +27,19 @@ def build_graph(geojson_data):
 
         for i in range(len(coordinates) - 1):
             node1 = tuple(coordinates[i])
-            node2 = tuple(coordinates[i+1])
+            node2 = tuple(coordinates[i + 1])
 
-            # Calculate distance between nodes
-            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i+1][1], coordinates[i+1][0])).meters
-
-            # Add edge with distance as weight
-            G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i+1]), flood_depths=(flood_depths[i], flood_depths[i+1]))
+            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i + 1][1], coordinates[i + 1][0])).meters
+            G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i + 1]), flood_depths=(flood_depths[i], flood_depths[i + 1]))
 
     return G
+
+# Update graph nodes with betweenness centrality
+def update_betweenness_from_json(G, betweenness_json):
+    for node, b_prime in betweenness_json.items():
+        node_coordinates = eval(node)  # Convert string back to tuple
+        if node_coordinates in G.nodes:
+            G.nodes[node_coordinates]['b_prime'] = round(b_prime, 4)
 
 # Calculate elevation gain/loss, maximum flood depth, and total distance
 def calculate_metrics(path, G, speed_mps):
@@ -40,7 +50,7 @@ def calculate_metrics(path, G, speed_mps):
 
     for i in range(len(path) - 1):
         node1 = path[i]
-        node2 = path[i+1]
+        node2 = path[i + 1]
         edge_data = G.get_edge_data(node1, node2)
         elevations = edge_data['elevations']
         flood_depths = edge_data['flood_depths']
@@ -63,6 +73,7 @@ def calculate_metrics(path, G, speed_mps):
     travel_time = total_distance / speed_mps
     return total_gain, total_loss, max_flood_depth, total_distance, travel_time
 
+# Visualize the shortest path on a map
 def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_flood_depth, total_distance, travel_time, start_node, end_node):
     central_point = [7.0512, 125.5987]  # Update to your area
     m = folium.Map(location=central_point, zoom_start=15)
@@ -98,25 +109,34 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
         ).add_to(m)
 
     m.save(output_html)
-    print(f"Map with shortest path, start, and end points saved to {output_html}")
+    print(f"Map saved to {output_html}")
 
+# Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    # node1 = random.choice(nodes)
-    node1 = (125.6023788, 7.063822)
-    node2 = (125.579685, 7.0656892)
+    node1 = (125.6015325, 7.0647666) 
+    node2 = (125.6024582, 7.0766550)
+
+    if not nx.has_path(G, node1, node2):
+        print("No path found between the selected nodes.")
+
     return node1, node2
 
 # Main logic to load the GeoJSON and run Dijkstra
-geojson_file = 'davao_specific_barangays_road_network.geojson'
+geojson_file = 'roads_with_elevation_and_flood.geojson'
+betweenness_path = 'betweenness_data.json'
 output_html = 'shortest_path_map.html'
+
 speed_mps = 1.4
 
 # Load the GeoJSON and build the graph
 geojson_data = load_geojson(geojson_file)
 G = build_graph(geojson_data)
 
-# Select two random connected nodes
+# Load betweenness from JSON
+betweenness_json = load_betweenness_from_json(betweenness_path)
+update_betweenness_from_json(G, betweenness_json)
+
 start_node, end_node = select_connected_nodes(G)
 print(f"Start node: {start_node}, End node: {end_node}")
 
@@ -124,17 +144,16 @@ print(f"Start node: {start_node}, End node: {end_node}")
 start_time = time.time()
 
 try:
-    shortest_path = nx.dijkstra_path(G, source=start_node, target=end_node, weight='weight')
+    shortest_path = nx.dijkstra_path(G, source=start_node, target=end_node, weight='distance')
+
     end_time = time.time()
     computation_time = end_time - start_time
     print(f"Shortest path computed in {computation_time:.4f} seconds")
 
-    # Calculate metrics
     total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(shortest_path, G, speed_mps)
-    
-    # Visualize the path
+
     visualize_path(geojson_data, shortest_path, output_html, total_gain, total_loss, max_flood_depth, total_distance, travel_time, start_node, end_node)
-    
+
     print(f"Total Distance: {total_distance:.2f} meters")
     print(f"Travel Time: {travel_time:.2f} seconds")
     print(f"Elevation Gain: {total_gain:.2f} meters, Elevation Loss: {total_loss:.2f} meters")

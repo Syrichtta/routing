@@ -52,6 +52,8 @@ def calculate_metrics(path, G, speed_mps):
     for i in range(len(path) - 1):
         node1 = path[i]
         node2 = path[i+1]
+        # print(f"node 1: {node1}")
+        # print(f"node 2: {node2}")
         edge_data = G.get_edge_data(node1, node2)
         elevations = edge_data['elevations']
         flood_depths = edge_data['flood_depths']
@@ -149,7 +151,8 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    node1 = (125.6015325, 7.0647666)
+    # node1 = (125.5920339, 7.1219125)
+    node1 = (125.6305739, 7.0927439)
     node2 = (125.6024582, 7.0766550)
 
     # node1 = random.choice(nodes)
@@ -160,31 +163,50 @@ def select_connected_nodes(G):
     # (125.6024582, 7.0766550), # Rizal Memorial Colleges
 
     # Ensure the nodes are connected
-    # while not nx.has_path(G, node1, node2):
-    #     node2 = random.choice(nodes)
+    if not nx.has_path(G, node1, node2):
+        print('node path')
 
     return node1, node2
 
 
-def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta):
+def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
+    
+    # print(f"node 1: {node1}")
+    # print(f"node 2: {node2}")
+
     # Calculate the straight-line distance (h(n))
     h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
-    
-    # Get g(n): cost from start node to current node
-    g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
-    
+
+    # Get g(n): cost from start node to current node (assuming a distance weight)
+    try:
+        g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
+    except nx.NetworkXNoPath:
+        g_n = float('inf')  # Handle no-path case
+
     # Get b'(n): inverse betweenness centrality
-    b_prime = G.nodes[node1]['b_prime']
-    
-    # Get i(n) and j(n): distance and slope parameters
-    if G.has_edge(node1, node2):
-        distance = G[node1][node2]['distance']
+    b_prime = G.nodes[node1].get('b_prime', 0)
+
+    # Initialize metrics
+    distance, slope, flood_depth = 0, 0, 0
+
+    # Get edge data if edge exists
+    edge_data = G.get_edge_data(node1, node2)
+    if edge_data:
+        distance = edge_data.get('distance', 0)
         slope = calculate_slope(node1, node2, G)
-    else:
-        distance, slope = 0, 0
-    
-    # Compute total cost
-    f_n = (alpha * (g_n + h_n)) + (beta * b_prime) + (gamma * distance) + (delta * slope)
+        flood_depth = max(edge_data.get('flood_depths', [0]))
+        print(distance)
+        print(slope)
+        print(flood_depth)
+
+    # Compute total cost (including flood depth as a penalty)
+    f_n = (
+        alpha * (g_n + h_n) +
+        beta * b_prime +
+        gamma * distance +
+        delta * slope +
+        epsilon * flood_depth
+    )
     return f_n
 
 
@@ -234,10 +256,11 @@ start_time = time.time()
 try:
     # Update A* call with the new heuristic
     shortest_path = nx.astar_path(
-    G, 
-    source=start_node, 
-    target=end_node, 
-    heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1), 
+        G, 
+        source=start_node, 
+        target=end_node, 
+        heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7
+    ), 
     weight='distance'
 )
 
