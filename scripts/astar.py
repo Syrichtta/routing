@@ -8,14 +8,13 @@ from pyproj import Transformer
 import rasterio
 from tqdm import tqdm
 
-# # Load GeoJSON data
-# def load_geojson(file_path):
-#     with open(file_path) as f:
-#         return json.load(f)
-
 # Load GeoJSON data
 def load_geojson(file_path):
     with open(file_path) as f:
+        return json.load(f)
+    
+def load_betweenness_from_json(json_file):
+    with open(json_file) as f:
         return json.load(f)
 
 # Build the graph from GeoJSON
@@ -36,6 +35,12 @@ def build_graph(geojson_data):
 
     return G
 
+def update_betweenness_from_json(G, betweenness_json):
+    for node, b_prime in betweenness_json.items():
+        # The node in the betweenness JSON should match the node format in the graph
+        node_coordinates = eval(node)  # Convert string back to tuple (e.g., "(125.6147335, 7.0948561)" -> (125.6147335, 7.0948561)
+        if node_coordinates in G.nodes:
+            G.nodes[node_coordinates]['b_prime'] = round(b_prime, 4)
 
 # Calculate elevation gain/loss, maximum flood depth, and total distance
 def calculate_metrics(path, G, speed_mps):
@@ -187,6 +192,7 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta):
 # Main logic to load the GeoJSON and run A*
 geojson_file = 'roads_with_elevation_and_flood.geojson'
 flood_raster_path = 'davaoFloodMap11_11_24_SRI30.tif'  
+betweenness_path = 'betweenness_data.json'
 output_html = 'shortest_path_map.html'
 
 # Average walking speed in meters per second (adjust this as needed)
@@ -196,27 +202,31 @@ speed_mps = 1.4
 geojson_data = load_geojson(geojson_file)
 G = build_graph(geojson_data)  
 
+# Load betweenness from JSON
+betweenness_json = load_betweenness_from_json(betweenness_path)
 
-# Select two random connected nodes
+# Update the graph nodes with b_prime values
+update_betweenness_from_json(G, betweenness_json)
+
 start_node, end_node = select_connected_nodes(G)
 print(f"Start node: {start_node}, End node: {end_node}")
 
-betweenness = {}
-nodes = list(G.nodes)
-print("Calculating betweenness centrality...")
-for node in tqdm(nodes, desc="Processing nodes"):
-    betweenness[node] = sum(
-        nx.single_source_dijkstra_path_length(G, node, weight='distance').values()
-    )
+# betweenness = {}
+# nodes = list(G.nodes)
+# print("Calculating betweenness centrality...")
+# for node in tqdm(nodes, desc="Processing nodes"):
+#     betweenness[node] = sum(
+#         nx.single_source_dijkstra_path_length(G, node, weight='distance').values()
+#     )
 
-# Normalize betweenness centrality
-max_b = max(betweenness.values())
-betweenness = {node: value / max_b for node, value in betweenness.items()}
+# # Normalize betweenness centrality
+# max_b = max(betweenness.values())
+# betweenness = {node: value / max_b for node, value in betweenness.items()}
 
 
-print("Adding inverse betweenness centrality to graph nodes...")
-for node in tqdm(G.nodes, desc="Processing nodes"):
-    G.nodes[node]['b_prime'] = max_b - betweenness[node]
+# print("Adding inverse betweenness centrality to graph nodes...")
+# for node in tqdm(G.nodes, desc="Processing nodes"):
+#     G.nodes[node]['b_prime'] = max_b - betweenness[node]
 
 # Measure computation time for A* algorithm
 start_time = time.time()
