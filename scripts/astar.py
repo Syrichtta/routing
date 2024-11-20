@@ -8,10 +8,10 @@ from pyproj import Transformer
 import rasterio
 from tqdm import tqdm
 
-# Load GeoJSON data
-def load_geojson(file_path):
-    with open(file_path) as f:
-        return json.load(f)
+# # Load GeoJSON data
+# def load_geojson(file_path):
+#     with open(file_path) as f:
+#         return json.load(f)
 
 # Load GeoJSON data
 def load_geojson(file_path):
