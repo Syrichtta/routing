@@ -114,7 +114,7 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    node1 = (125.6015325, 7.0647666) 
+    node1 = (125.6305739, 7.0927439)
     node2 = (125.6024582, 7.0766550)
 
     if not nx.has_path(G, node1, node2):
