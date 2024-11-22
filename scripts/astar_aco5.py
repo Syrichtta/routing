@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", fo
 
 # ACO parameters
 num_ants = 10
-num_iterations = 10
+num_iterations = 50
 alpha = 1.0        # Pheromone importance
 beta = 2.0         # Heuristic importance
 evaporation_rate = 0.3
@@ -41,17 +41,25 @@ def calculate_slope(node1, node2, G):
         return 0  # Return 0 if no edge exists
 
 # Heuristic function from A* script (extended version)
-def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7):
-    # Calculate the straight-line distance (h(n))
-    h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
-
-    # Get g(n): cost from start node to current node (assuming a distance weight)
+def heuristic_extended(node1, node2, G, alpha=1, beta=0.25, gamma=0.2, delta=0.1, epsilon=7):
+    # Calculate straight-line distance heuristic (h(n))
+    # Assuming nodes have 'pos' attribute with (latitude, longitude)
     try:
-        g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
-    except nx.NetworkXNoPath:
-        g_n = float('inf')  # Handle no-path case
+        h_n = geodesic(
+            G.nodes[node1]['pos'][::-1],  # Swap order for (lon, lat)
+            G.nodes[node2]['pos'][::-1]
+        ).meters
+    except (KeyError, Exception):
+        # Fallback to Euclidean distance if geodesic fails
+        try:
+            h_n = np.linalg.norm(
+                np.array(G.nodes[node1]['pos']) - 
+                np.array(G.nodes[node2]['pos'])
+            )
+        except:
+            h_n = float('inf')
 
-    # Get b'(n): inverse betweenness centrality
+    # Get inverse betweenness centrality
     b_prime = G.nodes[node1].get('b_prime', 0)
 
     # Initialize metrics
@@ -64,9 +72,9 @@ def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0
         slope = calculate_slope(node1, node2, G)
         flood_depth = max(edge_data.get('flood_depths', [0]))
 
-    # Compute total cost (including flood depth as a penalty)
+    # Compute total cost 
     f_n = (
-        alpha * (g_n + h_n) +
+        alpha * h_n +  # Only h(n) now
         beta * b_prime +
         gamma * distance +
         delta * slope +
@@ -103,9 +111,19 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
     if initial_best_path:
         initial_best_path_length = sum(G[initial_best_path[i]][initial_best_path[i + 1]]["distance"] 
                                        for i in range(len(initial_best_path) - 1))
-        max_path_length = initial_best_path_length * 2  # Allow paths up to twice the initial path length
+        max_path_length = initial_best_path_length * 15  # Allow paths up to 3 times the initial path length
 
+    # Initialize pheromone levels
     pheromone_levels = {tuple(sorted(edge)): 1.0 for edge in G.edges()}
+    
+    # BOOST PHEROMONES FOR INITIAL BEST PATH
+    if initial_best_path:
+        initial_boost_factor = 10.0  # Significantly boost pheromones for the initial path
+        for i in range(len(initial_best_path) - 1):
+            edge = tuple(sorted((initial_best_path[i], initial_best_path[i + 1])))
+            pheromone_levels[edge] *= initial_boost_factor
+            logging.info(f"Boosted pheromone level for edge {edge} to {pheromone_levels[edge]}")
+
     best_path = None
     best_path_length = float('inf')
     path_found = False
@@ -291,29 +309,83 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
     base_map.save(output_html)
     print(f"Network and all paths visualized and saved to {output_html}")
 
-# Main script
 def main():
     geojson_file = 'roads_with_elevation_and_flood.geojson'
     output_html = 'aco_path_map.html'
+
+    # Define waypoints
+    waypoints = [
+        # (125.5657858, 7.1161489),  # Manila Memorial Park
+        (125.5794607, 7.0664451),  # Shrine Hills
+        (125.6024582, 7.0766550)   # Rizal Memorial Colleges
+    ]
 
     # Load GeoJSON and build graph
     geojson_data = load_geojson(geojson_file)
     G = build_graph(geojson_data)
 
-    # Define start and end nodes (longitude, latitude)
-    start_node = (125.6305739, 7.0927439)
-    end_node = (125.5794607, 7.0664451)
+    # Calculate paths between consecutive waypoints
+    initial_best_path = []
+    best_max_flood_depth = float('inf')
+    best_start_index = 0
 
-    initial_best_path = [(125.6305739, 7.0927439), (125.6305829, 7.0926863), (125.6300046, 7.0926142), (125.6300166, 7.0925444), (125.6300334, 7.0924632), (125.6300545, 7.0923986), (125.6299858, 7.0923381), (125.6299583, 7.0923188), (125.6299281, 7.0923062), (125.6298892, 7.0922968), (125.6298128, 7.0922862), (125.6298191, 7.0922253), (125.6298205, 7.092204), (125.6298165, 7.0921877), (125.6298034, 7.0921621), (125.6296988, 7.0920826), (125.6290859, 7.0916487), (125.6290101, 7.0915868), (125.6286753, 7.0913117), (125.6283294, 7.0910235), (125.62795, 7.0907112), (125.6278171, 7.0905936), (125.6274703, 7.0902866), (125.6273391, 7.0901535), (125.6271608, 7.089917), (125.626696, 7.089337), (125.6268174, 7.0891687), (125.6271332, 7.0887914), (125.6273465, 7.0885412), (125.6270416, 7.0882821), (125.6266102, 7.0879529), (125.6265075, 7.0878713), (125.6261421, 7.0875765), (125.6242032, 7.0859534), (125.624218, 7.0858841), (125.6242322, 7.0858047), (125.6242458, 7.0857253), (125.6242586, 7.085641), (125.6242195, 7.0853481), (125.6242186, 7.085154), (125.6242206, 7.0851018), (125.6242252, 7.0850499), (125.6243312, 7.0838527), (125.6243653, 7.0834669), (125.6243886, 7.0832037), (125.6242688, 7.0831049), (125.6241694, 7.0830234), (125.6239106, 7.0828105), (125.6237361, 7.0827223), (125.6231086, 7.082212), (125.6230246, 7.0821436), (125.6226207, 7.0818103), (125.6219159, 7.0812111), (125.62186, 7.0811216), (125.6216719, 7.0809672), (125.6215495, 7.0808608), (125.6214261, 7.0807655), (125.6211268, 7.0805198), (125.6207, 7.0801693), (125.6194853, 7.0791698), (125.6194364, 7.0791279), (125.6183687, 7.0782359), (125.6182788, 7.0781596), (125.6178769, 7.0778188), (125.6175218, 7.0775347), (125.617467, 7.077493), (125.6174308, 7.0774532), (125.6174077, 7.077418), (125.6173991, 7.0773682), (125.6173978, 7.077326), (125.6173471, 7.0772962), (125.6173229, 7.0772852), (125.6173262, 7.077212), (125.6173355, 7.0770498), (125.6172507, 7.0769606), (125.6171692, 7.0768813), (125.6171691, 7.0767962), (125.6169917, 7.0767856), (125.6168389, 7.0767775), (125.6167435, 7.0767724), (125.6164674, 7.0767576), (125.6161408, 7.0767401), (125.6160492, 7.0767352), (125.6158301, 7.0767235), (125.6152282, 7.0766912), (125.6151816, 7.0766887), (125.6150403, 7.0766811), (125.6148481, 7.076671), (125.613557, 7.0766017), (125.6134517, 7.0765601), (125.6133857, 7.0765376), (125.6133392, 7.0765357), (125.6132918, 7.0765339), (125.6132038, 7.0765314), (125.6131548, 7.0765289), (125.6131036, 7.0765241), (125.613038, 7.0765108), (125.6129642, 7.07649), (125.6128869, 7.0764602), (125.6128422, 7.0764387), (125.6127862, 7.0764058), (125.6126619, 7.0763121), (125.6121345, 7.0758584), (125.6118072, 7.0755733), (125.6116907, 7.0754807), (125.6116351, 7.0754474), (125.6115728, 7.0754152), (125.6114837, 7.0753752), (125.6114303, 7.0753572), (125.6113737, 7.0753456), (125.6113099, 7.0753389), (125.6112533, 7.075333), (125.611161, 7.0753266), (125.6110723, 7.0753217), (125.6109218, 7.0753134), (125.6108891, 7.0753118), (125.6107778, 7.0753043), (125.6106557, 7.075284), (125.6104682, 7.0752426), (125.6103184, 7.0751908), (125.6101975, 7.075139), (125.6101656, 7.075122), (125.6100476, 7.0750594), (125.6099805, 7.0750146), (125.6099287, 7.07498), (125.6098341, 7.0749087), (125.609733, 7.074824), (125.6095793, 7.0746731), (125.6094526, 7.0745092), (125.6093608, 7.0743503), (125.6092833, 7.074188), (125.6092409, 7.0740553), (125.6091537, 7.0737629), (125.6090882, 7.0735781), (125.6090585, 7.0735019), (125.6090221, 7.0734291), (125.6089184, 7.0732594), (125.6088612, 7.0731958), (125.6085792, 7.072961), (125.6082892, 7.072724), (125.60715, 7.0717929), (125.6067826, 7.0714926), (125.6058699, 7.0707466), (125.6057684, 7.0706621), (125.6052888, 7.0702631), (125.6049903, 7.0700147), (125.6048775, 7.0699208), (125.6043963, 7.0695225), (125.6035767, 7.0688441), (125.6028179, 7.0682223), (125.6025897, 7.0680383), (125.6025354, 7.0679863), (125.6024717, 7.0679085), (125.602406, 7.0678047), (125.6023282, 7.0676556), (125.6022712, 7.0675112), (125.6022405, 7.0674101), (125.6021327, 7.0669692), (125.6020973, 7.066801), (125.6020454, 7.0665543), (125.6017438, 7.0650329), (125.6017076, 7.0648811), (125.6016679, 7.0647314), (125.601641, 7.0646479), (125.6016113, 7.0645667), (125.6015662, 7.0644678), (125.6014885, 7.0643339), (125.6014011, 7.0641936), (125.6013406, 7.0641141), (125.6012756, 7.064034), (125.6011788, 7.0639368), (125.6010945, 7.0638625), (125.6009912, 7.063781), (125.6009302, 7.0637375), (125.6008573, 7.0636934), (125.6007091, 7.0636148), (125.6006686, 7.0635969), (125.6005437, 7.0635499), (125.6003847, 7.0635062), (125.6002689, 7.0634779), (125.5996428, 7.0633241), (125.599459, 7.0632789), (125.5992023, 7.0632159), (125.5987314, 7.0631002), (125.5980219, 7.0629304), (125.5979825, 7.062921), (125.5968357, 7.0626466), (125.5967054, 7.0626154), (125.5963195, 7.0625231), (125.5957901, 7.0623964), (125.5956187, 7.0623553), (125.595538, 7.062336), (125.5950782, 7.062226), (125.5948098, 7.0621618), (125.5933404, 7.0618101), (125.5932656, 7.0617922), (125.5929402, 7.0617144), (125.5928223, 7.0616869), (125.5919994, 7.0614951), (125.591138, 7.0612942), (125.5909836, 7.061258), (125.5908615, 7.0612293), (125.5905919, 7.0611663), (125.5904419, 7.0611312), (125.5903595, 7.061112), (125.5896079, 7.0609374), (125.5892303, 7.0608495), (125.5891777, 7.0608373), (125.5888089, 7.0607495), (125.5880353, 7.0605646), (125.5879673, 7.0605486), (125.5877364, 7.0604941), (125.5875713, 7.0604551), (125.5873905, 7.0604125), (125.5869974, 7.0603182), (125.586266, 7.0601428), (125.5861127, 7.0601057), (125.5859567, 7.0600679), (125.5856537, 7.0599937), (125.5853698, 7.0599252), (125.5849635, 7.0598271), (125.584937, 7.0599356), (125.5840668, 7.0597297), (125.5836552, 7.0596323), (125.5835623, 7.0596197), (125.5834787, 7.0596116), (125.5832538, 7.0595968), (125.5826577, 7.0595575), (125.5824256, 7.0595346), (125.5821767, 7.0594993), (125.5821469, 7.059542), (125.5821265, 7.0595616), (125.5821026, 7.0595796), (125.5820754, 7.0595935), (125.5820486, 7.0596031), (125.5820083, 7.059617), (125.581951, 7.0596306), (125.5817527, 7.0597399), (125.5816477, 7.0597978), (125.5815667, 7.0598466), (125.5815068, 7.059893), (125.581463, 7.0599416), (125.581411, 7.0600107), (125.5812314, 7.0603139), (125.5812156, 7.0603827), (125.5811502, 7.0604887), (125.5810993, 7.0605284), (125.581014, 7.0606668), (125.5805891, 7.0613477), (125.5805406, 7.0614189), (125.5804836, 7.0614882), (125.5804172, 7.061552), (125.580462, 7.0616249), (125.5804757, 7.0616833), (125.5804822, 7.0617334), (125.5805041, 7.0618913), (125.5805243, 7.0619789), (125.5805355, 7.0620422), (125.580572, 7.0622167), (125.5806109, 7.0623088), (125.5806517, 7.0623763), (125.5807069, 7.0624532), (125.5807747, 7.0625234), (125.5808567, 7.0625947), (125.5809255, 7.0626434), (125.5809835, 7.0626832), (125.5813939, 7.0629633), (125.5811624, 7.0633352), (125.5803256, 7.0645944), (125.5800459, 7.0650195), (125.5799657, 7.064983), (125.5799113, 7.0649658), (125.5798589, 7.0649567), (125.5798117, 7.0649529), (125.5797252, 7.0649509), (125.57973, 7.0651281), (125.579734, 7.0654209), (125.5797273, 7.0654956), (125.5797131, 7.0655867), (125.579685, 7.0656892), (125.5794607, 7.0664451)]
+    # Try all possible starting points and calculate paths
+    for start_index in range(len(waypoints)):
+        current_path = []
+        current_total_path = []
+        current_max_flood_depth = 0
+
+        # Create a path through the waypoints in order
+        for i in range(start_index, start_index + len(waypoints)):
+            start_node = waypoints[i % len(waypoints)]
+            end_node = waypoints[(i + 1) % len(waypoints)]
+
+            try:
+                # Use A* to find the path between consecutive waypoints
+                path = nx.astar_path(G, start_node, end_node, 
+                                     heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
+                                     weight='weight')
+                
+                # Calculate metrics for this path segment
+                _, _, max_flood_depth, _, _ = calculate_metrics(path, G)
+                current_max_flood_depth = max(current_max_flood_depth, max_flood_depth)
+                
+                # Extend the current total path 
+                # If it's the first segment, add the whole path
+                # If not, skip the first node to avoid duplicates
+                current_total_path.extend(path[1:] if current_total_path else path)
+
+            except nx.NetworkXNoPath:
+                print(f"No path found between {start_node} and {end_node}")
+                break
+
+        # Check if this starting point gives the least max flood depth
+        if current_max_flood_depth < best_max_flood_depth:
+            best_max_flood_depth = current_max_flood_depth
+            initial_best_path = current_total_path
+            best_start_index = start_index
+
+    # Set the start and end nodes based on the best path
+    start_node = (125.6305739, 7.0927439)
+    end_node = initial_best_path[-1]
+
+    print(f"Best initial path start index: {best_start_index}")
+    print(f"Best max flood depth: {best_max_flood_depth}")
+    print(f"Start node: {start_node}")
+    print(f"End node: {end_node}")
 
     start_time = time.time()
-    best_path, best_path_length, all_paths = ant_colony_optimization(G, start_node, end_node, initial_best_path=initial_best_path)
+    best_path, best_path_length, all_paths = ant_colony_optimization(
+        G, 
+        start_node, 
+        end_node, 
+        initial_best_path=initial_best_path
+    )
     end_time = time.time()
 
     # Display results
     if best_path:
         print(f"ACO completed in {end_time - start_time:.2f} seconds")
-        # print(f"Best path: {best_path}")
         print(f"Best path length: {best_path_length:.2f} meters")
 
         total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(
@@ -331,8 +403,7 @@ def main():
         visualize_paths(G, best_path, all_paths, start_node, end_node)
     else:
         print("ACO failed to find a path between the start and end nodes.")
-
-    # Call the visualization function
+        visualize_paths(G, best_path, all_paths, start_node, end_node)
 
 if __name__ == "__main__":
     main()

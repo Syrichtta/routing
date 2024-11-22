@@ -4,6 +4,7 @@ import folium
 import random
 from geopy.distance import geodesic
 import time
+import numpy as np
 from pyproj import Transformer
 import rasterio
 from tqdm import tqdm
@@ -153,7 +154,7 @@ def select_connected_nodes(G):
     nodes = list(G.nodes)
     # node1 = (125.5920339, 7.1219125)
     node1 = (125.6305739, 7.0927439)
-    node2 = (125.6024582, 7.0766550)
+    node2 = (125.5794607, 7.0664451)
 
     # node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
@@ -169,21 +170,25 @@ def select_connected_nodes(G):
     return node1, node2
 
 
-def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
-    
-    # print(f"node 1: {node1}")
-    # print(f"node 2: {node2}")
-
-    # Calculate the straight-line distance (h(n))
-    h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
-
-    # Get g(n): cost from start node to current node (assuming a distance weight)
+def heuristic_extended(node1, node2, G, alpha=1, beta=1, gamma=1, delta=1, epsilon=1):
+    # Calculate straight-line distance heuristic (h(n))
+    # Assuming nodes have 'pos' attribute with (latitude, longitude)
     try:
-        g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
-    except nx.NetworkXNoPath:
-        g_n = float('inf')  # Handle no-path case
+        h_n = geodesic(
+            G.nodes[node1]['pos'][::-1],  # Swap order for (lon, lat)
+            G.nodes[node2]['pos'][::-1]
+        ).meters
+    except (KeyError, Exception):
+        # Fallback to Euclidean distance if geodesic fails
+        try:
+            h_n = np.linalg.norm(
+                np.array(G.nodes[node1]['pos']) - 
+                np.array(G.nodes[node2]['pos'])
+            )
+        except:
+            h_n = float('inf')
 
-    # Get b'(n): inverse betweenness centrality
+    # Get inverse betweenness centrality
     b_prime = G.nodes[node1].get('b_prime', 0)
 
     # Initialize metrics
@@ -195,13 +200,10 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta, epsilon):
         distance = edge_data.get('distance', 0)
         slope = calculate_slope(node1, node2, G)
         flood_depth = max(edge_data.get('flood_depths', [0]))
-        print(distance)
-        print(slope)
-        print(flood_depth)
 
-    # Compute total cost (including flood depth as a penalty)
+    # Compute total cost 
     f_n = (
-        alpha * (g_n + h_n) +
+        alpha * h_n +  # Only h(n) now
         beta * b_prime +
         gamma * distance +
         delta * slope +
@@ -255,14 +257,9 @@ start_time = time.time()
 
 try:
     # Update A* call with the new heuristic
-    shortest_path = nx.astar_path(
-        G, 
-        source=start_node, 
-        target=end_node, 
-        heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7
-    ), 
-    weight='distance'
-)
+    shortest_path = nx.astar_path(G, start_node, end_node, 
+                     heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
+                     weight='weight')
 
     end_time = time.time()
     computation_time = end_time - start_time
@@ -279,7 +276,7 @@ try:
     
     # Visualize the path
     visualize_path(geojson_data, shortest_path, output_html, total_gain, total_loss, max_flood_depth, total_distance, travel_time, start_node, end_node)
-    
+    print(shortest_path)
     print(f"Total Distance: {total_distance:.2f} meters")
     print(f"Travel Time: {travel_time:.2f} seconds")
     print(f"Elevation Gain: {total_gain:.2f} meters, Elevation Loss: {total_loss:.2f} meters")
