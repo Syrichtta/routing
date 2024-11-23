@@ -13,11 +13,28 @@ logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", fo
 
 # ACO parameters
 num_ants = 10
-num_iterations = 50
+num_iterations = 10
 alpha = 1.0        # Pheromone importance
 beta = 2.0         # Heuristic importance
-evaporation_rate = 0.3
+evaporation_rate = 0.1
 pheromone_constant = 100.0
+
+def is_within_radius(node1, node2, radius_meters):
+    try:
+        distance = geodesic(
+            (node1[1], node1[0]),  # Convert to (lat, lon)
+            (node2[1], node2[0])
+        ).meters
+        return distance <= radius_meters
+    except:
+        return False
+
+def find_nodes_within_radius(G, center_node, radius_meters):
+    nodes_within_radius = set()
+    for node in G.nodes():
+        if is_within_radius(node, center_node, radius_meters):
+            nodes_within_radius.add(node)
+    return nodes_within_radius
 
 # Function to calculate slope (from A* script)
 def calculate_slope(node1, node2, G):
@@ -77,7 +94,7 @@ def heuristic_extended(node1, node2, G, alpha=1, beta=0.25, gamma=0.2, delta=0.1
         alpha * h_n +  # Only h(n) now
         beta * b_prime +
         gamma * distance +
-        delta * slope +
+        # delta * slope +
         epsilon * flood_depth
     )
     return f_n
@@ -105,125 +122,156 @@ def build_graph(geojson_data):
 
     return G
 
-def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
-    # If an initial best path is provided, use it as a length constraint
+def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, initial_best_path=None):
+    if forced_astar_points is None:
+        forced_astar_points = {}
+        
+    # Initialize as before
     max_path_length = float('inf')
     if initial_best_path:
         initial_best_path_length = sum(G[initial_best_path[i]][initial_best_path[i + 1]]["distance"] 
-                                       for i in range(len(initial_best_path) - 1))
-        max_path_length = initial_best_path_length * 15  # Allow paths up to 3 times the initial path length
+                                     for i in range(len(initial_best_path) - 1))
+        max_path_length = initial_best_path_length * 2
 
-    # Initialize pheromone levels
     pheromone_levels = {tuple(sorted(edge)): 1.0 for edge in G.edges()}
     
-    # BOOST PHEROMONES FOR INITIAL BEST PATH
+    protected_edges = set()
     if initial_best_path:
-        initial_boost_factor = 10.0  # Significantly boost pheromones for the initial path
+        initial_boost_factor = 10.0
         for i in range(len(initial_best_path) - 1):
             edge = tuple(sorted((initial_best_path[i], initial_best_path[i + 1])))
             pheromone_levels[edge] *= initial_boost_factor
-            logging.info(f"Boosted pheromone level for edge {edge} to {pheromone_levels[edge]}")
+            protected_edges.add(edge)
+            logging.info(f"Protected edge {edge} with pheromone level {pheromone_levels[edge]}")
 
     best_path = None
     best_path_length = float('inf')
     path_found = False
-    all_paths = []  # Store all paths taken by the ants
+    all_paths = []
 
     for iteration in range(num_iterations):
         logging.info(f"Iteration {iteration + 1}/{num_iterations}")
-
         paths = []
         path_lengths = []
 
         for ant in tqdm(range(num_ants), desc=f"Running ACO (Iteration {iteration + 1})", dynamic_ncols=False):
             current_node = start_node
-            stack = [current_node]  # Use a stack for backtracking
-            visited = set([current_node])  # Track visited nodes
+            stack = [current_node]
+            visited = set([current_node])
             path_length = 0
+            force_astar = False
+            current_target = end_node
 
             while stack:
-                current_node = stack[-1]  # Look at the top of the stack (current node)
+                current_node = stack[-1]
 
-                if current_node == end_node:
-                    path = list(stack)  # Successful path found
-                    path_length = sum(G[stack[i]][stack[i + 1]]["distance"] for i in range(len(stack) - 1))
+                # Check if we've reached a forced A* transition point
+                if current_node in forced_astar_points and not force_astar:
+                    force_astar = True
+                    current_target = forced_astar_points[current_node]
+                    logging.info(f"Ant {ant + 1} reached transition point {current_node}. Switching to A* targeting {current_target}")
                     
-                    # Check if this path length is within the constraint
-                    if path_length <= max_path_length:
-                        path_found = True
-                        logging.info(f"Ant {ant + 1} completed path: {path} with length: {path_length:.2f}")
+                    try:
+                        # Get A* path from current node to intermediate target
+                        astar_path = nx.astar_path(G, current_node, current_target,
+                                                 heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
+                                                 weight='weight')
                         
-                        # Check if this is the best path
-                        if path_length < best_path_length:
-                            best_path = path
-                            best_path_length = path_length
-                            logging.info(f"New best path found by Ant {ant + 1} with length: {best_path_length:.2f}")
+                        # Remove current node to avoid duplication
+                        astar_path = astar_path[1:]
+                        
+                        # Add A* path to stack and visited set
+                        for node in astar_path:
+                            if node not in visited:
+                                stack.append(node)
+                                visited.add(node)
+                                if len(stack) > 1:
+                                    path_length += G[stack[-2]][stack[-1]]["distance"]
+                        
+                        logging.info(f"A* path found and added to ant's path")
+                        continue
+                        
+                    except nx.NetworkXNoPath:
+                        logging.info(f"No A* path found from {current_node} to {current_target}")
+                        break
 
-                        paths.append(path)
-                        path_lengths.append(path_length)
+                if current_node == current_target:
+                    if current_target == end_node:
+                        path = list(stack)
+                        path_length = sum(G[stack[i]][stack[i + 1]]["distance"] for i in range(len(stack) - 1))
+                        
+                        if path_length <= max_path_length:
+                            path_found = True
+                            logging.info(f"Ant {ant + 1} completed path with length: {path_length:.2f}")
+                            
+                            if path_length < best_path_length:
+                                best_path = path
+                                best_path_length = path_length
+                                logging.info(f"New best path found with length: {best_path_length:.2f}")
+
+                            paths.append(path)
+                            path_lengths.append(path_length)
+                        break
                     else:
-                        logging.info(f"Ant {ant + 1} path discarded: Length {path_length:.2f} exceeds max {max_path_length:.2f}")
-                    
-                    break  # Exit while loop on success
+                        # We reached intermediate target, now target end_node
+                        current_target = end_node
+                        continue
 
-                # Get neighbors and filter visited ones
                 neighbors = list(G.neighbors(current_node))
                 unvisited_neighbors = [n for n in neighbors if n not in visited]
 
                 if unvisited_neighbors:
-                    # Decide which heuristic to use based on random number
-                    random_choice = round(random.random(), 1)
-                    
-                    if random_choice > 0.5:
-                        # Use A* heuristic function to choose the next node
+                    if force_astar:
+                        # Use only A* heuristic when forced
                         desirability = []
                         for neighbor in unvisited_neighbors:
-                            # Calculate heuristic value to the end node
-                            heuristic_value = heuristic_extended(neighbor, end_node, G)
+                            heuristic_value = heuristic_extended(neighbor, current_target, G)
                             desirability.append(heuristic_value)
                         
-                        # Select the next node with the lowest heuristic value
                         next_node = unvisited_neighbors[desirability.index(min(desirability))]
-                        logging.info(f"Ant {ant + 1} uses A* heuristic to select node {next_node}")
+                        logging.info(f"Ant {ant + 1} uses forced A* to select {next_node}")
                     else:
-                        # Use original ACO heuristic
-                        desirability = []
-                        for neighbor in unvisited_neighbors:
-                            distance = G[current_node][neighbor]["distance"]
-                            edge = tuple(sorted((current_node, neighbor)))
-                            pheromone = pheromone_levels.get(edge, 1.0)
-                            desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
+                        # Normal ACO behavior
+                        random_choice = round(random.random(), 1)
                         
-                        # Select the next node based on probabilities
-                        desirability_sum = sum(desirability)
-                        probabilities = [d / desirability_sum for d in desirability]
-                        next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
-                        logging.info(f"Ant {ant + 1} uses ACO heuristic to select node {next_node}")
+                        if random_choice > 0.5:
+                            desirability = []
+                            for neighbor in unvisited_neighbors:
+                                heuristic_value = heuristic_extended(neighbor, current_target, G)
+                                desirability.append(heuristic_value)
+                            
+                            next_node = unvisited_neighbors[desirability.index(min(desirability))]
+                            logging.info(f"Ant {ant + 1} uses A* heuristic to select {next_node}")
+                        else:
+                            desirability = []
+                            for neighbor in unvisited_neighbors:
+                                distance = G[current_node][neighbor]["distance"]
+                                edge = tuple(sorted((current_node, neighbor)))
+                                pheromone = pheromone_levels.get(edge, 1.0)
+                                desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
+                            
+                            desirability_sum = sum(desirability)
+                            probabilities = [d / desirability_sum for d in desirability]
+                            next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
+                            logging.info(f"Ant {ant + 1} uses ACO heuristic to select {next_node}")
 
-                    # Log the traversal step for this ant
-                    logging.info(f"Ant {ant + 1} moves from {current_node} to {next_node}.")
-
-                    # Check if adding this next node would exceed max path length
                     potential_path_length = path_length + G[current_node][next_node]["distance"]
                     if potential_path_length <= max_path_length:
-                        stack.append(next_node)  # Move to the next node
-                        visited.add(next_node)    # Mark the next node as visited
+                        stack.append(next_node)
+                        visited.add(next_node)
                         path_length = potential_path_length
                     else:
-                        logging.info(f"Ant {ant + 1} prevented from adding node {next_node} to prevent exceeding max path length")
                         break
                 else:
-                    # Backtrack if no unvisited neighbors
-                    logging.info(f"Ant {ant + 1} stuck at node {current_node} (no unvisited neighbors). Backtracking...")
-                    stack.pop()  # Backtrack by removing the last node from the stack
+                    stack.pop()
 
-            all_paths.append(stack)  # Store the path taken by this ant
+            all_paths.append(stack)
 
-        # Pheromone evaporation
+        # Pheromone updates as before
         for edge in pheromone_levels:
-            pheromone_levels[edge] *= (1 - evaporation_rate)
+            if edge not in protected_edges:
+                pheromone_levels[edge] *= (1 - evaporation_rate)
 
-        # Pheromone deposit
         for path, length in zip(paths, path_lengths):
             if length > 0:
                 pheromone_deposit = pheromone_constant / length
@@ -232,13 +280,12 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
                     pheromone_levels[edge] += pheromone_deposit
 
         logging.info(f"Pheromone levels after iteration {iteration + 1}: {pheromone_levels}")
-        logging.info("")  # Add a blank line for readability
+        logging.info("")
 
-    # Ensure returning three values
     if not path_found:
-        return None, float('inf'), all_paths  # Return all paths even if no valid path is found
+        return None, float('inf'), all_paths
 
-    return best_path, best_path_length, all_paths  # Return all paths
+    return best_path, best_path_length, all_paths
 
 def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m/s
     total_gain = 0
@@ -369,6 +416,10 @@ def main():
     start_node = (125.6305739, 7.0927439)
     end_node = initial_best_path[-1]
 
+    forced_astar_points = [
+        (125.57402890, 7.08130460),
+    ]
+
     print(f"Best initial path start index: {best_start_index}")
     print(f"Best max flood depth: {best_max_flood_depth}")
     print(f"Start node: {start_node}")
@@ -378,7 +429,8 @@ def main():
     best_path, best_path_length, all_paths = ant_colony_optimization(
         G, 
         start_node, 
-        end_node, 
+        end_node,
+        forced_astar_points = forced_astar_points, 
         initial_best_path=initial_best_path
     )
     end_time = time.time()
