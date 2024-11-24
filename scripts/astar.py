@@ -4,6 +4,7 @@ import folium
 import random
 from geopy.distance import geodesic
 import time
+import numpy as np
 from pyproj import Transformer
 import rasterio
 from tqdm import tqdm
@@ -12,10 +13,9 @@ from tqdm import tqdm
 def load_geojson(file_path):
     with open(file_path) as f:
         return json.load(f)
-
-# Load GeoJSON data
-def load_geojson(file_path):
-    with open(file_path) as f:
+    
+def load_betweenness_from_json(json_file):
+    with open(json_file) as f:
         return json.load(f)
 
 # Build the graph from GeoJSON
@@ -36,6 +36,12 @@ def build_graph(geojson_data):
 
     return G
 
+def update_betweenness_from_json(G, betweenness_json):
+    for node, b_prime in betweenness_json.items():
+        # The node in the betweenness JSON should match the node format in the graph
+        node_coordinates = eval(node)  # Convert string back to tuple (e.g., "(125.6147335, 7.0948561)" -> (125.6147335, 7.0948561)
+        if node_coordinates in G.nodes:
+            G.nodes[node_coordinates]['b_prime'] = round(b_prime, 4)
 
 # Calculate elevation gain/loss, maximum flood depth, and total distance
 def calculate_metrics(path, G, speed_mps):
@@ -47,6 +53,8 @@ def calculate_metrics(path, G, speed_mps):
     for i in range(len(path) - 1):
         node1 = path[i]
         node2 = path[i+1]
+        # print(f"node 1: {node1}")
+        # print(f"node 2: {node2}")
         edge_data = G.get_edge_data(node1, node2)
         elevations = edge_data['elevations']
         flood_depths = edge_data['flood_depths']
@@ -144,8 +152,9 @@ def visualize_path(geojson_data, path, output_html, total_gain, total_loss, max_
 # Randomly select two connected nodes from the graph
 def select_connected_nodes(G):
     nodes = list(G.nodes)
-    node1 = (125.6015325, 7.0647666)
-    node2 = (125.6024582, 7.0766550)
+    # node1 = (125.5920339, 7.1219125)
+    node1 = (125.6305739, 7.0927439)
+    node2 = (125.5794607, 7.0664451)
 
     # node1 = random.choice(nodes)
     # node2 = random.choice(nodes)
@@ -155,31 +164,51 @@ def select_connected_nodes(G):
     # (125.6024582, 7.0766550), # Rizal Memorial Colleges
 
     # Ensure the nodes are connected
-    # while not nx.has_path(G, node1, node2):
-    #     node2 = random.choice(nodes)
+    if not nx.has_path(G, node1, node2):
+        print('node path')
 
     return node1, node2
 
 
-def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta):
-    # Calculate the straight-line distance (h(n))
-    h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
-    
-    # Get g(n): cost from start node to current node
-    g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
-    
-    # Get b'(n): inverse betweenness centrality
-    b_prime = G.nodes[node1]['b_prime']
-    
-    # Get i(n) and j(n): distance and slope parameters
-    if G.has_edge(node1, node2):
-        distance = G[node1][node2]['distance']
+def heuristic_extended(node1, node2, G, alpha=1, beta=1, gamma=1, delta=1, epsilon=1):
+    # Calculate straight-line distance heuristic (h(n))
+    # Assuming nodes have 'pos' attribute with (latitude, longitude)
+    try:
+        h_n = geodesic(
+            G.nodes[node1]['pos'][::-1],  # Swap order for (lon, lat)
+            G.nodes[node2]['pos'][::-1]
+        ).meters
+    except (KeyError, Exception):
+        # Fallback to Euclidean distance if geodesic fails
+        try:
+            h_n = np.linalg.norm(
+                np.array(G.nodes[node1]['pos']) - 
+                np.array(G.nodes[node2]['pos'])
+            )
+        except:
+            h_n = float('inf')
+
+    # Get inverse betweenness centrality
+    b_prime = G.nodes[node1].get('b_prime', 0)
+
+    # Initialize metrics
+    distance, slope, flood_depth = 0, 0, 0
+
+    # Get edge data if edge exists
+    edge_data = G.get_edge_data(node1, node2)
+    if edge_data:
+        distance = edge_data.get('distance', 0)
         slope = calculate_slope(node1, node2, G)
-    else:
-        distance, slope = 0, 0
-    
-    # Compute total cost
-    f_n = (alpha * (g_n + h_n)) + (beta * b_prime) + (gamma * distance) + (delta * slope)
+        flood_depth = max(edge_data.get('flood_depths', [0]))
+
+    # Compute total cost 
+    f_n = (
+        alpha * h_n +  # Only h(n) now
+        beta * b_prime +
+        gamma * distance +
+        delta * slope +
+        epsilon * flood_depth
+    )
     return f_n
 
 
@@ -187,6 +216,7 @@ def heuristic_extended(node1, node2, G, alpha, beta, gamma, delta):
 # Main logic to load the GeoJSON and run A*
 geojson_file = 'roads_with_elevation_and_flood.geojson'
 flood_raster_path = 'davaoFloodMap11_11_24_SRI30.tif'  
+betweenness_path = 'betweenness_data.json'
 output_html = 'shortest_path_map.html'
 
 # Average walking speed in meters per second (adjust this as needed)
@@ -196,40 +226,40 @@ speed_mps = 1.4
 geojson_data = load_geojson(geojson_file)
 G = build_graph(geojson_data)  
 
+# Load betweenness from JSON
+betweenness_json = load_betweenness_from_json(betweenness_path)
 
-# Select two random connected nodes
+# Update the graph nodes with b_prime values
+update_betweenness_from_json(G, betweenness_json)
+
 start_node, end_node = select_connected_nodes(G)
 print(f"Start node: {start_node}, End node: {end_node}")
 
-betweenness = {}
-nodes = list(G.nodes)
-print("Calculating betweenness centrality...")
-for node in tqdm(nodes, desc="Processing nodes"):
-    betweenness[node] = sum(
-        nx.single_source_dijkstra_path_length(G, node, weight='distance').values()
-    )
+# betweenness = {}
+# nodes = list(G.nodes)
+# print("Calculating betweenness centrality...")
+# for node in tqdm(nodes, desc="Processing nodes"):
+#     betweenness[node] = sum(
+#         nx.single_source_dijkstra_path_length(G, node, weight='distance').values()
+#     )
 
-# Normalize betweenness centrality
-max_b = max(betweenness.values())
-betweenness = {node: value / max_b for node, value in betweenness.items()}
+# # Normalize betweenness centrality
+# max_b = max(betweenness.values())
+# betweenness = {node: value / max_b for node, value in betweenness.items()}
 
 
-print("Adding inverse betweenness centrality to graph nodes...")
-for node in tqdm(G.nodes, desc="Processing nodes"):
-    G.nodes[node]['b_prime'] = max_b - betweenness[node]
+# print("Adding inverse betweenness centrality to graph nodes...")
+# for node in tqdm(G.nodes, desc="Processing nodes"):
+#     G.nodes[node]['b_prime'] = max_b - betweenness[node]
 
 # Measure computation time for A* algorithm
 start_time = time.time()
 
 try:
     # Update A* call with the new heuristic
-    shortest_path = nx.astar_path(
-    G, 
-    source=start_node, 
-    target=end_node, 
-    heuristic=lambda n1, n2: heuristic_extended(n1, n2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1), 
-    weight='distance'
-)
+    shortest_path = nx.astar_path(G, start_node, end_node, 
+                     heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
+                     weight='weight')
 
     end_time = time.time()
     computation_time = end_time - start_time
@@ -246,7 +276,7 @@ try:
     
     # Visualize the path
     visualize_path(geojson_data, shortest_path, output_html, total_gain, total_loss, max_flood_depth, total_distance, travel_time, start_node, end_node)
-    
+    print(shortest_path)
     print(f"Total Distance: {total_distance:.2f} meters")
     print(f"Travel Time: {travel_time:.2f} seconds")
     print(f"Elevation Gain: {total_gain:.2f} meters, Elevation Loss: {total_loss:.2f} meters")
