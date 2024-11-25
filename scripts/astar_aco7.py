@@ -7,13 +7,17 @@ import logging
 from geopy.distance import geodesic
 from tqdm import tqdm
 import folium
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
+# Selected node from main application
+simulation_inputs = json.loads(sys.argv[1])
+
 # ACO parameters
-num_ants = 25
-num_iterations = 50
+num_ants = simulation_inputs["ant_count"]
+num_iterations = simulation_inputs["iteration_count"]
 alpha = 1.0        # Pheromone importance
 beta = 2.0         # Heuristic importance
 evaporation_rate = 0.1
@@ -329,14 +333,14 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
 
     # Save the map to an HTML file
     base_map.save(output_html)
-    print(f"Network and all paths visualized and saved to {output_html}")
+    # print(f"Network and all paths visualized and saved to {output_html}")
 
 def main():
     geojson_file = 'roads_with_elevation_and_flood.geojson'
-    output_html = 'aco_path_map.html'
+    output_html = 'aco_paths_map.html'
 
     # Fixed start point
-    start_node = (125.6305739, 7.0927439)
+    start_node = (simulation_inputs["lon"], simulation_inputs["lat"])
     
     # Potential end points
     waypoints = [
@@ -385,13 +389,13 @@ def main():
         speed_mps=1.5
     )
     
-    print("\nInitial Best Path Metrics:")
-    print(f"Selected end node: {end_node}")
-    print(f"Total Elevation Gain: {initial_gain:.2f} meters")
-    print(f"Total Elevation Loss: {initial_loss:.2f} meters")
-    print(f"Maximum Flood Depth: {initial_flood:.2f} meters")
-    print(f"Total Path Distance: {initial_distance:.2f} meters")
-    print(f"Estimated Travel Time: {initial_time:.2f} seconds ({initial_time/60:.2f} minutes)")
+    # print("\nInitial Best Path Metrics:")
+    # print(f"Selected end node: {end_node}")
+    # print(f"Total Elevation Gain: {initial_gain:.2f} meters")
+    # print(f"Total Elevation Loss: {initial_loss:.2f} meters")
+    # print(f"Maximum Flood Depth: {initial_flood:.2f} meters")
+    # print(f"Total Path Distance: {initial_distance:.2f} meters")
+    # print(f"Estimated Travel Time: {initial_time:.2f} seconds ({initial_time/60:.2f} minutes)")
 
     start_time = time.time()
     best_path, best_path_length, all_paths = ant_colony_optimization(
@@ -404,8 +408,8 @@ def main():
 
     # Display results
     if best_path:
-        print(f"ACO completed in {end_time - start_time:.2f} seconds")
-        print(f"Best path length: {best_path_length:.2f} meters")
+        # print(f"ACO completed in {end_time - start_time:.2f} seconds")
+        # print(f"Best path length: {best_path_length:.2f} meters")
 
         total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(
             best_path, 
@@ -413,13 +417,28 @@ def main():
             speed_mps=1.5  # Average walking speed (can be adjusted)
         )
         
-        print("\nPath Metrics:")
-        print(f"Total Elevation Gain: {total_gain:.2f} meters")
-        print(f"Total Elevation Loss: {total_loss:.2f} meters")
-        print(f"Maximum Flood Depth: {max_flood_depth:.2f} meters")
-        print(f"Total Path Distance: {total_distance:.2f} meters")
-        print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
+        # print("\nPath Metrics:")
+        # print(f"Total Elevation Gain: {total_gain:.2f} meters")
+        # print(f"Total Elevation Loss: {total_loss:.2f} meters")
+        # print(f"Maximum Flood Depth: {max_flood_depth:.2f} meters")
+        # print(f"Total Path Distance: {total_distance:.2f} meters")
+        # print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
+        print(f"Ant Count: {num_ants}")
+        print(f"Iteration Count: {num_iterations}")
         visualize_paths(G, best_path, all_paths, start_node, end_node)
+        result = {
+            "status": "success" if best_path else "failure",
+            "final_gain": round(total_gain, 2) if best_path else None,
+            "final_loss": round(total_loss, 2) if best_path else None,
+            "final_flood": round(max_flood_depth, 2) if best_path else None,
+            "final_distance": round(total_distance, 2) if best_path else None,
+            "final_time": round(travel_time, 2) if best_path else None,
+            "output_html": output_html,  # Path to the resulting HTML file
+            "aco_duration": round(end_time - start_time, 2) if best_path else None
+        }
+        
+        print(json.dumps(result))
+
     else:
         print("ACO failed to find a path between the start and end nodes.")
         visualize_paths(G, best_path, all_paths, start_node, end_node)
