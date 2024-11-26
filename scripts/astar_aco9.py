@@ -83,6 +83,12 @@ def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0
         slope = calculate_slope(node1, node2, G)
         flood_depth = max(edge_data.get('flood_depths', [0]))
 
+    # print(f"hn: {h_n}")
+    # print(f"b_brime: {b_prime}")
+    # print(f"distance: {distance}")
+    # print(f"slope: {slope}")
+    # print(f"flood_depth: {flood_depth}")
+
     f_n = (
         alpha * (h_n) +
         beta * b_prime +
@@ -94,7 +100,7 @@ def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0
 
 # ACO parameters
 num_ants = 25
-num_iterations = 50 
+num_iterations = 50
 alpha = 1.0        
 beta = 2.0         
 evaporation_rate = 0.1

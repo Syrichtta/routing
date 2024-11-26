@@ -10,12 +10,12 @@ import folium
 import math
     
 # build graph network && append betweenness
-def build_graph(geojson_data, betweenness_file):
+def build_graph(geojson_file, betweenness_file):
     # load betweenness data
     with open(betweenness_file) as f:
         betweenness_data = json.load(f)
     # load betweenness data
-    with open(betweenness_file) as f:
+    with open(geojson_file) as f:
         geojson_data = json.load(f)
     
     G = nx.Graph()
@@ -71,7 +71,7 @@ def heuristic_extended(edge, end_node, G, alpha=0.2, beta=0.25, gamma=0.2, delta
     # print(h_n)
 
     # get b'(n): inverse betweenness centrality
-    b_prime = G.nodes[node1].get('b_prime', 0)
+    b_prime = G.nodes[node2].get('b_prime', 0)
 
     distance, slope, flood_depth = 0, 0, 0
 
@@ -206,7 +206,7 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
             all_paths.append(stack)
 
         # pheromone update
-        for edge in pheromone_levels:
+        for edge in pheromone_levels:   
             if edge not in protected_edges:
                 pheromone_levels[edge] *= (1 - evaporation_rate)
 
@@ -236,7 +236,7 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
 
 # get path metrics
 def calculate_metrics(path, G, speed_mps):
-    max_elevation_increase = 0
+    max_slope = 0
     max_flood_depth = 0
     total_distance = 0
     
@@ -250,11 +250,14 @@ def calculate_metrics(path, G, speed_mps):
         elevations = edge_data.get('elevations', (0, 0))
         elevation1 = elevations[0] if not math.isnan(elevations[0]) else 0
         elevation2 = elevations[1] if not math.isnan(elevations[1]) else 0
+
+        horizontal_distance = edge_data.get('distance', 0)
         
         # calculate elevation increase
         elevation_diff = elevation2 - elevation1
-        if elevation_diff > 0:
-            max_elevation_increase = max(max_elevation_increase, elevation_diff)
+        if horizontal_distance > 0:  # Avoid division by zero
+            slope = elevation_diff / horizontal_distance
+            max_slope = max(max_slope, slope)
         
         # handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
@@ -262,12 +265,9 @@ def calculate_metrics(path, G, speed_mps):
             depth = depth if not math.isnan(depth) else 0
             max_flood_depth = max(max_flood_depth, depth)
         
-        # calculate total distance
         total_distance += edge_data.get('distance', 0)
     
-    travel_time = total_distance / speed_mps if speed_mps > 0 else float('inf')
-    
-    return max_elevation_increase, max_flood_depth, total_distance, travel_time
+    return max_slope, max_flood_depth, total_distance
 
 # visualization results
 def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html):
@@ -318,10 +318,10 @@ def main():
         try:
             # use A* to find path to this waypoint
             path = nx.astar_path(G, start_node, waypoint,
-                            #    heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
+                               heuristic=lambda n1, n2: heuristic_extended(tuple(n1, n2,), waypoint, G),
                                weight='weight')
             
-            _, _, total_distance, _ = calculate_metrics(path, G, speed_mps=1.14)
+            _, _, total_distance = calculate_metrics(path, G, speed_mps=1.14)
             
             if total_distance < shortest_distance:
                 shortest_distance = total_distance
@@ -337,18 +337,13 @@ def main():
         return
 
     print(f"Selected end node: {end_node}")
-    max_elevation_increase, initial_flood, initial_distance, initial_time = calculate_metrics(
-        initial_best_path,
-        G,
-        speed_mps=1.14
-    )
+    max_slope, initial_flood, initial_distance = calculate_metrics( initial_best_path, G, speed_mps=1.14)
     
     print("\nInitial Best Path Metrics:")
     print(f"Selected end node: {end_node}")
-    print(f"Maximum Elevation Increase: {max_elevation_increase:.2f} meters")
+    print(f"Maximum Slope: {max_slope:.2f} meters")
     print(f"Maximum Flood Depth: {initial_flood:.2f} meters")
     print(f"Total Path Distance: {initial_distance:.2f} meters")
-    print(f"Estimated Travel Time: {initial_time:.2f} seconds ({initial_time/60:.2f} minutes)")
 
     start_time = time.time()
     best_path, best_path_length, all_paths, completed_paths = ant_colony_optimization(
@@ -364,19 +359,18 @@ def main():
         print(f"ACO completed in {end_time - start_time:.2f} seconds")
         print(f"Best path length: {best_path_length:.2f} meters")
 
-        max_elevation_increase, max_flood_depth, total_distance, travel_time = calculate_metrics(
+        max_slope, max_flood_depth, total_distance = calculate_metrics(
             best_path, 
             G, 
             speed_mps=1.14  # walking speed based on average gait
         )
         
         print("\nPath Metrics:")
-        print(f"Maximum Elevation Increase: {max_elevation_increase:.2f} meters")
+        print(f"Maximum Slope: {max_slope:.2f} meters")
         print(f"Maximum Flood Depth: {max_flood_depth:.2f} meters")
         print(f"Total Path Distance: {total_distance:.2f} meters")
-        # print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
-        visualize_paths(G, best_path, all_paths, start_node, end_node, output_html)
         print(f"Number of completed paths: {len(completed_paths)}")
+        visualize_paths(G, best_path, all_paths, start_node, end_node, output_html)
     else:
         print("ACO failed to find a path between the start and end nodes.")
         visualize_paths(G, best_path, all_paths, start_node, end_node, output_html)
