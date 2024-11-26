@@ -10,82 +10,16 @@ import folium
 import pandas as pd
 import math
 
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
-
-# ACO parameters
-num_ants = 25
-num_iterations = 50
-alpha = 1.0        # Pheromone importance
-beta = 2.0         # Heuristic importance
-evaporation_rate = 0.1
-pheromone_constant = 100.0
-
-# Function to calculate slope (from A* script)
-def calculate_slope(node1, node2, G):
-    if G.has_edge(node1, node2):
-        edge_data = G[node1][node2]
-        elevation1 = edge_data['elevations'][0]  # Elevation of node1
-        elevation2 = edge_data['elevations'][1]  # Elevation of node2
-        horizontal_distance = edge_data['distance']  # Horizontal distance between nodes
-
-        # Calculate the change in elevation
-        elevation_change = elevation2 - elevation1
-
-        # Calculate slope (rise/run)
-        if horizontal_distance > 0:  # Prevent division by zero
-            slope = elevation_change / horizontal_distance
-        else:
-            slope = 0
-
-        return slope
-    else:
-        return 0  # Return 0 if no edge exists
-
-# Heuristic function from A* script (extended version)
-def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7):
-    # Calculate the straight-line distance (h(n))
-    h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
-
-    # Get g(n): cost from start node to current node (assuming a distance weight)
-    # try:
-    #     g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
-    # except nx.NetworkXNoPath:
-    #     g_n = float('inf')  # Handle no-path case
-
-    # Get b'(n): inverse betweenness centrality
-    b_prime = G.nodes[node1].get('b_prime', 0)
-
-    # Initialize metrics
-    distance, slope, flood_depth = 0, 0, 0
-
-    # Get edge data if edge exists
-    edge_data = G.get_edge_data(node1, node2)
-    if edge_data:
-        distance = edge_data.get('distance', 0)
-        slope = calculate_slope(node1, node2, G)
-        flood_depth = max(edge_data.get('flood_depths', [0]))
-
-    # Compute total cost (including flood depth as a penalty)
-    f_n = (
-        alpha * (h_n) +
-        beta * b_prime +
-        gamma * distance +
-        delta * slope +
-        epsilon * flood_depth
-    )
-    return f_n
-
-# Load GeoJSON data
-def load_geojson(file_path):
-    with open(file_path) as f:
-        return json.load(f)
-
-def build_graph(geojson_data, betweenness_file):
+# build graph
+def build_graph(geojson_file, betweenness_file):
+    
     # Load betweenness data
     with open(betweenness_file) as f:
         betweenness_data = json.load(f)
+
+    # load GeoJSON data
+    with open(geojson_file) as f:
+        geojson_data = json.load(f)
     
     G = nx.Graph()
     for feature in geojson_data['features']:
@@ -115,6 +49,77 @@ def build_graph(geojson_data, betweenness_file):
     
     return G
 
+# Function to calculate slope (from A* script)
+def calculate_slope(node1, node2, G):
+    if G.has_edge(node1, node2):
+        edge_data = G[node1][node2]
+
+        # Get elevations and handle missing data
+        elevations = edge_data.get('elevations', [None, None])
+        elevation1 = elevations[0] if elevations[0] is not None else 0
+        elevation2 = elevations[1] if elevations[1] is not None else 0
+
+        # Get horizontal distance and handle missing data
+        horizontal_distance = edge_data.get('distance', 0)
+
+        # Calculate the change in elevation
+        elevation_change = elevation2 - elevation1
+
+        # Calculate slope (rise/run)
+        if horizontal_distance > 0:  # Prevent division by zero
+            slope = elevation_change / horizontal_distance
+        else:
+            slope = 0
+
+        return slope
+    else:
+        return 0  # Return 0 if no edge exists
+
+
+# Heuristic function from A* script (extended version)
+def heuristic_extended(edge, end_node, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7):
+    node1, node2 = edge
+    # calculate the straight-line distance (h(n))
+    h_n = geodesic((node2[1], node2[0]), (end_node[1], end_node[0])).meters
+    # print(h_n)
+
+    # get b'(n): inverse betweenness centrality
+    b_prime = G.nodes[node1].get('b_prime', 0)
+
+    distance, slope, flood_depth = 0, 0, 0
+
+    # get edge data
+    edge_data = G.get_edge_data(node1,node2)
+    # print(edge_data)
+    if edge_data:
+        distance = edge_data.get('distance', 0)
+        slope = calculate_slope(node1, node2, G)
+        # Handle flood depths
+        flood_depths = edge_data.get('flood_depths', [0])
+        filtered_flood_depths = [fd for fd in flood_depths if fd is not None]
+        flood_depth = max(filtered_flood_depths, default=0)
+    # print(distance)
+    f_n = (
+        alpha * (h_n) + 
+        beta * b_prime +
+        gamma * distance +
+        delta * slope +
+        epsilon * flood_depth
+    )
+    return f_n
+
+# ACO parameters
+num_ants = 25
+num_iterations = 30 
+alpha = 1.0        
+beta = 2.0         
+evaporation_rate = 0.1
+pheromone_constant = 100.0
+
+# logging for ant behavior
+logging.basicConfig(level=logging.INFO, filename="astar_aco_log.txt", filemode="w", format="%(message)s")
+
+# ACO main function
 def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
         
     max_path_length = float('inf')
@@ -186,7 +191,7 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
                     if random_choice > 0.5:
                         desirability = []
                         for neighbor in unvisited_neighbors:
-                            heuristic_value = heuristic_extended(neighbor, current_target, G)
+                            heuristic_value = heuristic_extended(tuple((current_node, neighbor)), current_target, G)
                             desirability.append(heuristic_value)
                           
                         next_node = unvisited_neighbors[desirability.index(min(desirability))]
@@ -235,6 +240,7 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
         return None, float('inf'), []
 
     # sort completed paths
+    completed_paths = []
     completed_paths = sorted(
         [(path, sum(G[path[i]][path[i + 1]]["distance"] for i in range(len(path) - 1))) 
          for path in all_paths 
@@ -351,65 +357,65 @@ def main():
         (125.5952838, 7.0779905),
         (125.6119783, 7.090352),
         (125.6135774, 7.0603729),
-        (125.5750689, 7.0513503),
-        (125.6204416, 7.0717227),
-        (125.6197874, 7.1082214),
-        (125.595055, 7.0839762),
-        (125.6205352, 7.1117953),
-        (125.6290101, 7.0915868),
-        (125.6004868, 7.0501385),
-        (125.6066222, 7.105572),
-        (125.616509, 7.1008208),
-        (125.6308756, 7.0864334),
-        (125.5776109, 7.1005932),
-        (125.6311633, 7.1095096),
-        (125.5882688, 7.0546153),
-        (125.5882568, 7.0552328),
-        (125.6325084, 7.1120355),
-        (125.6102425, 7.0911402),
-        (125.6259356, 7.1040573),
-        (125.6111768, 7.0554749),
-        (125.6217104, 7.0684683),
-        (125.6236336, 7.1240124),
-        (125.602972, 7.101847),
-        (125.5635374, 7.0504705),
-        (125.5850548, 7.1076778),
-        (125.613681, 7.1067177),
-        (125.6110282, 7.0867481),
-        (125.6000619, 7.0560896),
-        (125.5813632, 7.1006017),
-        (125.6202836, 7.0783214),
-        (125.6008343, 7.0679565),
-        (125.6002622, 7.1132092),
-        (125.6155904, 7.0955002),
-        (125.5918958, 7.0550804),
-        (125.5968052, 7.048139),
-        (125.5979938, 7.11038),
-        (125.5751903, 7.0905102),
-        (125.6180152, 7.0656255),
-        (125.630134, 7.097913),
-        (125.6291087, 7.0990867),
-        (125.5762927, 7.053404),
-        (125.6202769, 7.1157497),
-        (125.6144223, 7.062505),
-        (125.5699834, 7.0638791),
-        (125.6217581, 7.0680991),
-        (125.6291965, 7.1104166),
-        (125.6129826, 7.1121067),
-        (125.6131144, 7.0785856),
-        (125.5999186, 7.1060495),
-        (125.5918126, 7.084462),
-        (125.6107244, 7.0500581),
-        (125.6038221, 7.0609319),
-        (125.6227351, 7.1058975),
-        (125.5612206, 7.1120168),
-        (125.5993987, 7.0606709),
-        (125.6289825, 7.1107528),
-        (125.6248637, 7.0793785),
-        (125.6096956, 7.1074647),
-        (125.5961796, 7.0712703),
-        (125.6132924, 7.0765137),
-        (125.6090221, 7.0734291),
+        # (125.5750689, 7.0513503),
+        # (125.6204416, 7.0717227),
+        # (125.6197874, 7.1082214),
+        # (125.595055, 7.0839762),
+        # (125.6205352, 7.1117953),
+        # (125.6290101, 7.0915868),
+        # (125.6004868, 7.0501385),
+        # (125.6066222, 7.105572),
+        # (125.616509, 7.1008208),
+        # (125.6308756, 7.0864334),
+        # (125.5776109, 7.1005932),
+        # (125.6311633, 7.1095096),
+        # (125.5882688, 7.0546153),
+        # (125.5882568, 7.0552328),
+        # (125.6325084, 7.1120355),
+        # (125.6102425, 7.0911402),
+        # (125.6259356, 7.1040573),
+        # (125.6111768, 7.0554749),
+        # (125.6217104, 7.0684683),
+        # (125.6236336, 7.1240124),
+        # (125.602972, 7.101847),
+        # (125.5635374, 7.0504705),
+        # (125.5850548, 7.1076778),
+        # (125.613681, 7.1067177),
+        # (125.6110282, 7.0867481),
+        # (125.6000619, 7.0560896),
+        # (125.5813632, 7.1006017),
+        # (125.6202836, 7.0783214),
+        # (125.6008343, 7.0679565),
+        # (125.6002622, 7.1132092),
+        # (125.6155904, 7.0955002),
+        # (125.5918958, 7.0550804),
+        # (125.5968052, 7.048139),
+        # (125.5979938, 7.11038),
+        # (125.5751903, 7.0905102),
+        # (125.6180152, 7.0656255),
+        # (125.630134, 7.097913),
+        # (125.6291087, 7.0990867),
+        # (125.5762927, 7.053404),
+        # (125.6202769, 7.1157497),
+        # (125.6144223, 7.062505),
+        # (125.5699834, 7.0638791),
+        # (125.6217581, 7.0680991),
+        # (125.6291965, 7.1104166),
+        # (125.6129826, 7.1121067),
+        # (125.6131144, 7.0785856),
+        # (125.5999186, 7.1060495),
+        # (125.5918126, 7.084462),
+        # (125.6107244, 7.0500581),
+        # (125.6038221, 7.0609319),
+        # (125.6227351, 7.1058975),
+        # (125.5612206, 7.1120168),
+        # (125.5993987, 7.0606709),
+        # (125.6289825, 7.1107528),
+        # (125.6248637, 7.0793785),
+        # (125.6096956, 7.1074647),
+        # (125.5961796, 7.0712703),
+        # (125.6132924, 7.0765137),
+        # (125.6090221, 7.0734291),
     ]
     
     waypoints = [
@@ -420,8 +426,7 @@ def main():
 
     # Load GeoJSON and build graph
     print("building graph")
-    geojson_data = load_geojson(geojson_file)
-    G = build_graph(geojson_data, betweeness_file)
+    G = build_graph(geojson_file, betweeness_file)
     print("graph built")
 
     # Results storage
@@ -443,7 +448,7 @@ def main():
                 # Use A* to find path to this waypoint
                 path = nx.astar_path(
                     G, start_node, waypoint,
-                    heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
+                    # heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
                     weight='weight'
                 )
                 # Calculate total distance for this path
