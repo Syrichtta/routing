@@ -144,7 +144,7 @@ def ant_colony_optimization(G, start_node, end_node):
 
 # get path metrics
 def calculate_metrics(path, G, speed_mps):
-    max_elevation_increase = 0
+    max_slope = 0
     max_flood_depth = 0
     total_distance = 0
     
@@ -158,25 +158,24 @@ def calculate_metrics(path, G, speed_mps):
         elevations = edge_data.get('elevations', (0, 0))
         elevation1 = elevations[0] if not math.isnan(elevations[0]) else 0
         elevation2 = elevations[1] if not math.isnan(elevations[1]) else 0
+
+        horizontal_distance = edge_data.get('distance', 0)
         
         # calculate elevation increase
         elevation_diff = elevation2 - elevation1
-        if elevation_diff > 0:
-            max_elevation_increase = max(max_elevation_increase, elevation_diff)
+        if horizontal_distance > 0:  # Avoid division by zero
+            slope = elevation_diff / horizontal_distance
+            max_slope = max(max_slope, slope)
         
         # handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
         for depth in flood_depths:
-            if depth is None or (isinstance(depth, float) and math.isnan(depth)):
-                depth = 0
+            depth = depth if not math.isnan(depth) else 0
             max_flood_depth = max(max_flood_depth, depth)
         
-        # calculate total distance
         total_distance += edge_data.get('distance', 0)
     
-    travel_time = total_distance / speed_mps if speed_mps > 0 else float('inf')
-    
-    return max_elevation_increase, max_flood_depth, total_distance, travel_time
+    return max_slope, max_flood_depth, total_distance
 
 
 def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='aco_basemodel_paths_map.html'):
@@ -356,7 +355,7 @@ def main():
                     weight='weight'
                 )
                 # Calculate total distance for this path
-                _, _, total_distance, _ = calculate_metrics(path, G, speed_mps=1.14)
+                _, _, total_distance = calculate_metrics(path, G, speed_mps=1.14)
 
                 # Update if this is the shortest path found
                 if total_distance < shortest_distance:
@@ -384,7 +383,7 @@ def main():
         )
         end_time = time.time()
 
-        max_elevation_increase, max_flood_depth, total_distance, travel_time = calculate_metrics(
+        max_slope, max_flood_depth, total_distance = calculate_metrics(
             best_path, 
             G, 
             speed_mps=1.4  # Average walking speed (can be adjusted)
@@ -394,10 +393,9 @@ def main():
         results.append({
             "Start Node": start_node,
             "End Node": end_node,
-            "Maximum Elevation Increase": max_elevation_increase,
+            "Maximum Slope": max_slope,
             "Maximum Flood Depth": max_flood_depth,
             "Total Distance (m)": total_distance,
-            # "Travel Time (s)": travel_time,
             "Time": end_time - start_time
         })
 
