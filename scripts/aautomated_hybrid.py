@@ -491,7 +491,7 @@ def main():
         results.append({
             "Start Node": start_node,
             "End Node": end_node,
-            "Maximum SLope": max_slope,
+            "Maximum Slope": max_slope,
             "Maximum Flood Depth": max_flood_depth,
             "Total Distance (m)": total_distance,
             # "Travel Time (s)": travel_time,
