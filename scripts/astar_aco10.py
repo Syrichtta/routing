@@ -8,17 +8,15 @@ from geopy.distance import geodesic
 from tqdm import tqdm
 import folium
 import math
-
-# load GeoJSON data
-def load_geojson(file_path):
-    with open(file_path) as f:
-        return json.load(f)
     
 # build graph network && append betweenness
 def build_graph(geojson_data, betweenness_file):
     # load betweenness data
     with open(betweenness_file) as f:
         betweenness_data = json.load(f)
+    # load betweenness data
+    with open(betweenness_file) as f:
+        geojson_data = json.load(f)
     
     G = nx.Graph()
     for feature in geojson_data['features']:
@@ -309,8 +307,7 @@ def main():
         (125.6024582, 7.0766550)   # Rizal Memorial Colleges
     ]
 
-    geojson_data = load_geojson(geojson_file)
-    G = build_graph(geojson_data, betweeness_file)
+    G = build_graph(geojson_file, betweeness_file)
 
     # find shortest path to each potential end point
     shortest_distance = float('inf')
