@@ -28,7 +28,7 @@ def build_graph(geojson_data):
     return G
 
 NUM_ANTS = 25
-NUM_ITERATIONS = 50
+NUM_ITERATIONS = 20
 ALPHA = 1.0 
 BETA = 2.0    
 EVAPORATION_RATE = 0.1
@@ -40,7 +40,7 @@ def ant_colony_optimization(G, start_node, end_node):
     
     best_path = None
     best_path_length = float('inf')
-    max_path_length = float('inf')  # Can be set to a specific value if needed
+    max_path_length = float('inf') 
     all_paths = []
 
     for iteration in range(NUM_ITERATIONS):
