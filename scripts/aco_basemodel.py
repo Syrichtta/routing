@@ -6,13 +6,6 @@ from tqdm import tqdm
 import folium
 import time
 
-NUM_ANTS = 25
-NUM_ITERATIONS = 50
-ALPHA = 1.0 
-BETA = 2.0    
-EVAPORATION_RATE = 0.1
-PHEROMONE_CONSTANT = 100.0
-
 def load_geojson(file_path):
     with open(file_path) as f:
         return json.load(f)
@@ -33,6 +26,13 @@ def build_graph(geojson_data):
             G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i + 1]), flood_depths=(flood_depths[i], flood_depths[i + 1]))
 
     return G
+
+NUM_ANTS = 25
+NUM_ITERATIONS = 50
+ALPHA = 1.0 
+BETA = 2.0    
+EVAPORATION_RATE = 0.1
+PHEROMONE_CONSTANT = 100.0
 
 def ant_colony_optimization(G, start_node, end_node):
     # Initialize pheromone levels on all edges

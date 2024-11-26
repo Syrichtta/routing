@@ -490,7 +490,7 @@ def main():
             "Maximum Elevation Increase": max_elevation_increase,
             "Maximum Flood Depth": max_flood_depth,
             "Total Distance (m)": total_distance,
-            "Travel Time (s)": travel_time,
+            # "Travel Time (s)": travel_time,
             "Paths": len(completed_paths),
             "Time": end_time - start_time
         })

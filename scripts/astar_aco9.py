@@ -94,7 +94,7 @@ def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0
 
 # ACO parameters
 num_ants = 25
-num_iterations = 50
+num_iterations = 50 
 alpha = 1.0        
 beta = 2.0         
 evaporation_rate = 0.1
@@ -374,7 +374,7 @@ def main():
         print(f"Maximum Elevation Increase: {max_elevation_increase:.2f} meters")
         print(f"Maximum Flood Depth: {max_flood_depth:.2f} meters")
         print(f"Total Path Distance: {total_distance:.2f} meters")
-        print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
+        # print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
         visualize_paths(G, best_path, all_paths, start_node, end_node, output_html)
         print(f"Number of completed paths: {len(completed_paths)}")
     else:
