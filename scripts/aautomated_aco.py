@@ -170,7 +170,8 @@ def calculate_metrics(path, G, speed_mps):
         # handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
         for depth in flood_depths:
-            depth = depth if not math.isnan(depth) else 0
+            if depth is None or (isinstance(depth, float) and math.isnan(depth)):
+                depth = 0
             max_flood_depth = max(max_flood_depth, depth)
         
         total_distance += edge_data.get('distance', 0)
