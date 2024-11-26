@@ -7,13 +7,14 @@ import logging
 from geopy.distance import geodesic
 from tqdm import tqdm
 import folium
+import math
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO parameters
-num_ants = 25
-num_iterations = 50
+num_ants = 1
+num_iterations = 1
 alpha = 1.0        # Pheromone importance
 beta = 2.0         # Heuristic importance
 evaporation_rate = 0.1
@@ -283,10 +284,10 @@ def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m
         # Get edge data between nodes
         edge_data = G.get_edge_data(node1, node2)
         
-        # Extract elevations and handle potential None values
+        # Extract elevations and handle NaN as 0
         elevations = edge_data.get('elevations', (0, 0))
-        elevation1 = elevations[0] if elevations[0] is not None else 0
-        elevation2 = elevations[1] if elevations[1] is not None else 0
+        elevation1 = elevations[0] if not math.isnan(elevations[0]) else 0
+        elevation2 = elevations[1] if not math.isnan(elevations[1]) else 0
         
         # Calculate elevation gain/loss
         elevation_diff = elevation2 - elevation1
@@ -295,11 +296,11 @@ def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m
         else:
             total_loss += abs(elevation_diff)
         
-        # Handle flood depths
+        # Handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
         for depth in flood_depths:
-            if depth is not None:
-                max_flood_depth = max(max_flood_depth, depth)
+            depth = depth if not math.isnan(depth) else 0
+            max_flood_depth = max(max_flood_depth, depth)
         
         # Calculate total distance
         total_distance += edge_data.get('distance', 0)
@@ -340,11 +341,12 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
     print(f"Network and all paths visualized and saved to {output_html}")
 
 def main():
-    geojson_file = 'roads_with_elevation_and_flood.geojson'
+    geojson_file = 'roads_with_elevation_and_flood2.geojson'
     output_html = 'aco_path_map.html'
 
     # Fixed start point
-    start_node = (125.6305739, 7.0927439)
+    start_node = (125.5992942, 7.1079195)
+
     
     # Potential end points
     waypoints = [

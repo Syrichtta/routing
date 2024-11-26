@@ -18,7 +18,7 @@ transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
 # Function to get elevation at given coordinates
 def get_elevation(lon, lat):
-    elevation = None
+    elevation = 0.0
 
     # Retrieve elevation
     with rasterio.open(dem_path) as dem_src:
