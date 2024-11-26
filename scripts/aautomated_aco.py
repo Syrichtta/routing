@@ -21,22 +21,37 @@ def load_geojson(file_path):
     with open(file_path) as f:
         return json.load(f)
 
-# Build the graph from GeoJSON
-def build_graph(geojson_data):
+def build_graph(geojson_data, betweenness_file):
+    # Load betweenness data
+    with open(betweenness_file) as f:
+        betweenness_data = json.load(f)
+    
     G = nx.Graph()
-
     for feature in geojson_data['features']:
         coordinates = feature['geometry']['coordinates']
         elevations = feature['properties'].get('elevations', [0] * len(coordinates))
         flood_depths = feature['properties'].get('flood_depths', [0] * len(coordinates))
-
+        
         for i in range(len(coordinates) - 1):
             node1 = tuple(coordinates[i])
             node2 = tuple(coordinates[i + 1])
-
-            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i + 1][1], coordinates[i + 1][0])).meters
-            G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i + 1]), flood_depths=(flood_depths[i], flood_depths[i + 1]))
-
+            
+            # Calculate distance between nodes
+            dist = geodesic((coordinates[i][1], coordinates[i][0]), 
+                            (coordinates[i + 1][1], coordinates[i + 1][0])).meters
+            
+            # Get b_prime values if they exist
+            b_prime1 = betweenness_data.get(str(node1), 0)
+            b_prime2 = betweenness_data.get(str(node2), 0)
+            
+            # Add edge with all attributes
+            G.add_edge(node1, node2, 
+                       weight=dist, 
+                       distance=dist, 
+                       elevations=(elevations[i], elevations[i + 1]), 
+                       flood_depths=(flood_depths[i], flood_depths[i + 1]),
+                       b_prime=(b_prime1, b_prime2))
+    
     return G
 
 def ant_colony_optimization(G, start_node, end_node):
@@ -127,9 +142,9 @@ def ant_colony_optimization(G, start_node, end_node):
 
     return best_path, best_path_length, all_paths
 
-def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m/s
-    total_gain = 0
-    total_loss = 0
+# get path metrics
+def calculate_metrics(path, G, speed_mps):
+    max_elevation_increase = 0
     max_flood_depth = 0
     total_distance = 0
     
@@ -137,37 +152,31 @@ def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m
         node1 = path[i]
         node2 = path[i+1]
         
-        # Get edge data between nodes
         edge_data = G.get_edge_data(node1, node2)
         
-        # Extract elevations and handle NaN or string "nan" as 0
+        # extract elevations and handle NaN as 0
         elevations = edge_data.get('elevations', (0, 0))
-        elevation1 = float(elevations[0]) if elevations[0] not in [None, "nan"] and not math.isnan(float(elevations[0])) else 0
-        elevation2 = float(elevations[1]) if elevations[1] not in [None, "nan"] and not math.isnan(float(elevations[1])) else 0
+        elevation1 = elevations[0] if not math.isnan(elevations[0]) else 0
+        elevation2 = elevations[1] if not math.isnan(elevations[1]) else 0
         
-        # Calculate elevation gain/loss
+        # calculate elevation increase
         elevation_diff = elevation2 - elevation1
         if elevation_diff > 0:
-            total_gain += elevation_diff
-        else:
-            total_loss += abs(elevation_diff)
+            max_elevation_increase = max(max_elevation_increase, elevation_diff)
         
-        # Handle flood depths and treat "nan" or None as 0
+        # handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
         for depth in flood_depths:
-            if depth in [None, "nan"]:
+            if depth is None or (isinstance(depth, float) and math.isnan(depth)):
                 depth = 0
-            else:
-                depth = float(depth) if not math.isnan(float(depth)) else 0
             max_flood_depth = max(max_flood_depth, depth)
         
-        # Calculate total distance
+        # calculate total distance
         total_distance += edge_data.get('distance', 0)
     
-    # Calculate travel time based on total distance and speed
     travel_time = total_distance / speed_mps if speed_mps > 0 else float('inf')
     
-    return total_gain, total_loss, max_flood_depth, total_distance, travel_time
+    return max_elevation_increase, max_flood_depth, total_distance, travel_time
 
 
 def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='aco_basemodel_paths_map.html'):
@@ -217,22 +226,13 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
 
 def main():
     # Load and prepare data
-    geojson_file = 'roads_with_elevation_and_flood2.geojson'
+    geojson_file = 'roads_with_elevation_and_flood3.geojson'
+    betweeness_file = 'betweenness_data.json'
     output_excel = 'aco_basemodel_results.xlsx'
 
     # Define start nodes and waypoints
     start_nodes = [
         (125.5520585, 7.0848135),
-        (125.5557261, 7.0479058),
-        (125.6110406, 7.0756111),
-        (125.6294618, 7.1094295),
-        (125.5693223, 7.0471424),
-        (125.6082315, 7.0797573),
-        (125.5999222, 7.0742303),
-        (125.5813902, 7.1009692),
-        (125.5649791, 7.0809453),
-        (125.6078549, 7.0588429),
-        (125.5992942, 7.1079195),
         (125.6204559, 7.1063729),
         (125.6155148, 7.0774605),
         (125.5895257, 7.1093835),
@@ -323,6 +323,7 @@ def main():
         (125.6132924, 7.0765137),
         (125.6090221, 7.0734291),
     ]
+
     waypoints = [
         (125.5794607, 7.0664451),  # Shrine Hills
         (125.5657858, 7.1161489),  # Manila Memorial Park
@@ -332,7 +333,7 @@ def main():
     # Load GeoJSON and build graph
     print("building graph")
     geojson_data = load_geojson(geojson_file)
-    G = build_graph(geojson_data)
+    G = build_graph(geojson_data, betweeness_file)
     print("graph built")
 
     # Results storage
@@ -355,7 +356,7 @@ def main():
                     weight='weight'
                 )
                 # Calculate total distance for this path
-                _, _, _, total_distance, _ = calculate_metrics(path, G)
+                _, _, total_distance, _ = calculate_metrics(path, G, speed_mps=1.14)
 
                 # Update if this is the shortest path found
                 if total_distance < shortest_distance:
@@ -383,7 +384,7 @@ def main():
         )
         end_time = time.time()
 
-        total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(
+        max_elevation_increase, max_flood_depth, total_distance, travel_time = calculate_metrics(
             best_path, 
             G, 
             speed_mps=1.4  # Average walking speed (can be adjusted)
@@ -393,11 +394,10 @@ def main():
         results.append({
             "Start Node": start_node,
             "End Node": end_node,
-            "Total Elevation Gain": total_gain,
-            "Total Elevation Loss": total_loss,
+            "Maximum Elevation Increase": max_elevation_increase,
             "Maximum Flood Depth": max_flood_depth,
             "Total Distance (m)": total_distance,
-            "Travel Time (s)": travel_time,
+            # "Travel Time (s)": travel_time,
             "Time": end_time - start_time
         })
 
