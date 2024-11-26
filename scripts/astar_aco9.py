@@ -235,8 +235,7 @@ def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
 
 # get path metrics
 def calculate_metrics(path, G, speed_mps):
-    total_gain = 0
-    total_loss = 0
+    max_elevation_increase = 0
     max_flood_depth = 0
     total_distance = 0
     
@@ -251,12 +250,10 @@ def calculate_metrics(path, G, speed_mps):
         elevation1 = elevations[0] if not math.isnan(elevations[0]) else 0
         elevation2 = elevations[1] if not math.isnan(elevations[1]) else 0
         
-        # Calculate elevation gain/loss
+        # Calculate elevation increase
         elevation_diff = elevation2 - elevation1
         if elevation_diff > 0:
-            total_gain += elevation_diff
-        else:
-            total_loss += abs(elevation_diff)
+            max_elevation_increase = max(max_elevation_increase, elevation_diff)
         
         # Handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
@@ -270,7 +267,7 @@ def calculate_metrics(path, G, speed_mps):
     # Calculate travel time based on total distance and speed
     travel_time = total_distance / speed_mps if speed_mps > 0 else float('inf')
     
-    return total_gain, total_loss, max_flood_depth, total_distance, travel_time
+    return max_elevation_increase, max_flood_depth, total_distance, travel_time
 
 # visualization results
 def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html):
@@ -325,7 +322,7 @@ def main():
                                heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
                                weight='weight')
             
-            _, _, _, total_distance, _ = calculate_metrics(path, G, speed_mps=1.14)
+            _, _, total_distance, _ = calculate_metrics(path, G, speed_mps=1.14)
             
             if total_distance < shortest_distance:
                 shortest_distance = total_distance
@@ -341,7 +338,7 @@ def main():
         return
 
     print(f"Selected end node: {end_node}")
-    initial_gain, initial_loss, initial_flood, initial_distance, initial_time = calculate_metrics(
+    max_elevation_increase, initial_flood, initial_distance, initial_time = calculate_metrics(
         initial_best_path,
         G,
         speed_mps=1.14
@@ -349,8 +346,7 @@ def main():
     
     print("\nInitial Best Path Metrics:")
     print(f"Selected end node: {end_node}")
-    print(f"Total Elevation Gain: {initial_gain:.2f} meters")
-    print(f"Total Elevation Loss: {initial_loss:.2f} meters")
+    print(f"Maximum Elevation Increase: {max_elevation_increase:.2f} meters")
     print(f"Maximum Flood Depth: {initial_flood:.2f} meters")
     print(f"Total Path Distance: {initial_distance:.2f} meters")
     print(f"Estimated Travel Time: {initial_time:.2f} seconds ({initial_time/60:.2f} minutes)")
@@ -369,15 +365,14 @@ def main():
         print(f"ACO completed in {end_time - start_time:.2f} seconds")
         print(f"Best path length: {best_path_length:.2f} meters")
 
-        total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(
+        max_elevation_increase, max_flood_depth, total_distance, travel_time = calculate_metrics(
             best_path, 
             G, 
             speed_mps=1.14  # walking speed based on average gait
         )
         
         print("\nPath Metrics:")
-        print(f"Total Elevation Gain: {total_gain:.2f} meters")
-        print(f"Total Elevation Loss: {total_loss:.2f} meters")
+        print(f"Maximum Elevation Increase: {max_elevation_increase:.2f} meters")
         print(f"Maximum Flood Depth: {max_flood_depth:.2f} meters")
         print(f"Total Path Distance: {total_distance:.2f} meters")
         print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
