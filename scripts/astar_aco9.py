@@ -9,16 +9,42 @@ from tqdm import tqdm
 import folium
 import math
 
-# logging for ant behavior
-logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
-
-# ACO parameters
-num_ants = 25
-num_iterations = 50
-alpha = 1.0        
-beta = 2.0         
-evaporation_rate = 0.1
-pheromone_constant = 100.0
+# load GeoJSON data
+def load_geojson(file_path):
+    with open(file_path) as f:
+        return json.load(f)
+    
+# build graph network && append betweenness
+def build_graph(geojson_data, betweenness_file):
+    # load betweenness data
+    with open(betweenness_file) as f:
+        betweenness_data = json.load(f)
+    
+    G = nx.Graph()
+    for feature in geojson_data['features']:
+        coordinates = feature['geometry']['coordinates']
+        elevations = feature['properties'].get('elevations', [0] * len(coordinates))
+        flood_depths = feature['properties'].get('flood_depths', [0] * len(coordinates))
+        
+        for i in range(len(coordinates) - 1):
+            node1 = tuple(coordinates[i])
+            node2 = tuple(coordinates[i + 1])
+            
+            dist = geodesic((coordinates[i][1], coordinates[i][0]), 
+                            (coordinates[i + 1][1], coordinates[i + 1][0])).meters
+            
+            # get betweenness values
+            b_prime1 = betweenness_data.get(str(node1), 0)
+            b_prime2 = betweenness_data.get(str(node2), 0)
+            
+            G.add_edge(node1, node2, 
+                       weight=dist, 
+                       distance=dist, 
+                       elevations=(elevations[i], elevations[i + 1]), 
+                       flood_depths=(flood_depths[i], flood_depths[i + 1]),
+                       b_prime=(b_prime1, b_prime2))
+    
+    return G
 
 # calculate slope (used in heuristic)
 def calculate_slope(node1, node2, G):
@@ -66,42 +92,16 @@ def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0
     )
     return f_n
 
-# load GeoJSON data
-def load_geojson(file_path):
-    with open(file_path) as f:
-        return json.load(f)
-    
-# build graph network && apend betweenness
-def build_graph(geojson_data, betweenness_file):
-    # load betweenness data
-    with open(betweenness_file) as f:
-        betweenness_data = json.load(f)
-    
-    G = nx.Graph()
-    for feature in geojson_data['features']:
-        coordinates = feature['geometry']['coordinates']
-        elevations = feature['properties'].get('elevations', [0] * len(coordinates))
-        flood_depths = feature['properties'].get('flood_depths', [0] * len(coordinates))
-        
-        for i in range(len(coordinates) - 1):
-            node1 = tuple(coordinates[i])
-            node2 = tuple(coordinates[i + 1])
-            
-            dist = geodesic((coordinates[i][1], coordinates[i][0]), 
-                            (coordinates[i + 1][1], coordinates[i + 1][0])).meters
-            
-            # get betweenness values
-            b_prime1 = betweenness_data.get(str(node1), 0)
-            b_prime2 = betweenness_data.get(str(node2), 0)
-            
-            G.add_edge(node1, node2, 
-                       weight=dist, 
-                       distance=dist, 
-                       elevations=(elevations[i], elevations[i + 1]), 
-                       flood_depths=(flood_depths[i], flood_depths[i + 1]),
-                       b_prime=(b_prime1, b_prime2))
-    
-    return G
+# ACO parameters
+num_ants = 25
+num_iterations = 50
+alpha = 1.0        
+beta = 2.0         
+evaporation_rate = 0.1
+pheromone_constant = 100.0
+
+# logging for ant behavior
+logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO main function
 def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
@@ -245,33 +245,32 @@ def calculate_metrics(path, G, speed_mps):
         
         edge_data = G.get_edge_data(node1, node2)
         
-        # Extract elevations and handle NaN as 0
+        # extract elevations and handle NaN as 0
         elevations = edge_data.get('elevations', (0, 0))
         elevation1 = elevations[0] if not math.isnan(elevations[0]) else 0
         elevation2 = elevations[1] if not math.isnan(elevations[1]) else 0
         
-        # Calculate elevation increase
+        # calculate elevation increase
         elevation_diff = elevation2 - elevation1
         if elevation_diff > 0:
             max_elevation_increase = max(max_elevation_increase, elevation_diff)
         
-        # Handle flood depths and treat NaN as 0
+        # handle flood depths and treat NaN as 0
         flood_depths = edge_data.get('flood_depths', [0])
         for depth in flood_depths:
             depth = depth if not math.isnan(depth) else 0
             max_flood_depth = max(max_flood_depth, depth)
         
-        # Calculate total distance
+        # calculate total distance
         total_distance += edge_data.get('distance', 0)
     
-    # Calculate travel time based on total distance and speed
     travel_time = total_distance / speed_mps if speed_mps > 0 else float('inf')
     
     return max_elevation_increase, max_flood_depth, total_distance, travel_time
 
 # visualization results
 def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html):
-    base_map = folium.Map(location=[7.0866, 125.5782], zoom_start=14)  # Center on Davao City
+    base_map = folium.Map(location=[7.0866, 125.5782], zoom_start=14)  # center on Davao City
 
     folium.Marker(location=(start_node[1], start_node[0]), icon=folium.Icon(color='green', icon='info-sign')).add_to(base_map)
     folium.Marker(location=(end_node[1], end_node[0]), icon=folium.Icon(color='red', icon='info-sign')).add_to(base_map)

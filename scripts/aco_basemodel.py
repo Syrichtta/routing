@@ -6,20 +6,17 @@ from tqdm import tqdm
 import folium
 import time
 
-# ACO parameters
 NUM_ANTS = 25
 NUM_ITERATIONS = 50
-ALPHA = 1.0        # Pheromone importance
-BETA = 2.0         # Distance importance
+ALPHA = 1.0 
+BETA = 2.0    
 EVAPORATION_RATE = 0.1
 PHEROMONE_CONSTANT = 100.0
 
-# Load GeoJSON data
 def load_geojson(file_path):
     with open(file_path) as f:
         return json.load(f)
 
-# Build the graph from GeoJSON
 def build_graph(geojson_data):
     G = nx.Graph()
 
@@ -125,7 +122,7 @@ def ant_colony_optimization(G, start_node, end_node):
 
     return best_path, best_path_length, all_paths
 
-def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m/s
+def calculate_metrics(path, G, speed_mps=1.14):
     total_gain = 0
     total_loss = 0
     max_flood_depth = 0
@@ -135,40 +132,32 @@ def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m
         node1 = path[i]
         node2 = path[i+1]
         
-        # Get edge data between nodes
         edge_data = G.get_edge_data(node1, node2)
         
-        # Extract elevations and handle potential None values
         elevations = edge_data.get('elevations', (0, 0))
         elevation1 = elevations[0] if elevations[0] is not None else 0
         elevation2 = elevations[1] if elevations[1] is not None else 0
         
-        # Calculate elevation gain/loss
         elevation_diff = elevation2 - elevation1
         if elevation_diff > 0:
             total_gain += elevation_diff
         else:
             total_loss += abs(elevation_diff)
         
-        # Handle flood depths
         flood_depths = edge_data.get('flood_depths', [0])
         for depth in flood_depths:
             if depth is not None:
                 max_flood_depth = max(max_flood_depth, depth)
         
-        # Calculate total distance
         total_distance += edge_data.get('distance', 0)
     
-    # Calculate travel time based on total distance and speed
     travel_time = total_distance / speed_mps if speed_mps > 0 else float('inf')
     
     return total_gain, total_loss, max_flood_depth, total_distance, travel_time
 
 def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='aco_basemodel_paths_map.html'):
-    # Create base map centered on the start point
     base_map = folium.Map(location=[start_node[1], start_node[0]], zoom_start=14)
 
-    # Add start and end markers
     folium.Marker(
         location=(start_node[1], start_node[0]),
         icon=folium.Icon(color='green', icon='info-sign')
@@ -178,7 +167,6 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
         icon=folium.Icon(color='red', icon='info-sign')
     ).add_to(base_map)
 
-    # Draw network edges
     for edge in G.edges():
         node1, node2 = edge
         folium.PolyLine(
@@ -188,7 +176,6 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
             opacity=0.5
         ).add_to(base_map)
 
-    # Draw all ant paths
     for path in all_paths:
         if len(path) > 1:
             folium.PolyLine(
@@ -198,7 +185,6 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
                 opacity=0.3
             ).add_to(base_map)
 
-    # Draw best path if found
     if best_path:
         folium.PolyLine(
             locations=[(lat, lon) for lon, lat in best_path],
@@ -210,12 +196,10 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
     base_map.save(output_html)
 
 def main():
-    # Load and prepare data
     geojson_file = 'roads_with_elevation_and_flood.geojson'
     geojson_data = load_geojson(geojson_file)
     G = build_graph(geojson_data)
 
-    # Define start and end points
     start_node = (125.6305739, 7.0927439)
     end_node = (125.5657858, 7.1161489)
 
@@ -230,7 +214,7 @@ def main():
         total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(
             best_path, 
             G, 
-            speed_mps=1.5  # Average walking speed (can be adjusted)
+            speed_mps=1.114
         )
         
         
