@@ -82,29 +82,41 @@ def load_geojson(file_path):
     with open(file_path) as f:
         return json.load(f)
 
-# Build the graph from GeoJSON
-def build_graph(geojson_data):
+def build_graph(geojson_data, betweenness_file):
+    # Load betweenness data
+    with open(betweenness_file) as f:
+        betweenness_data = json.load(f)
+    
     G = nx.Graph()
-
     for feature in geojson_data['features']:
         coordinates = feature['geometry']['coordinates']
         elevations = feature['properties'].get('elevations', [0] * len(coordinates))
         flood_depths = feature['properties'].get('flood_depths', [0] * len(coordinates))
-
+        
         for i in range(len(coordinates) - 1):
             node1 = tuple(coordinates[i])
             node2 = tuple(coordinates[i + 1])
-
-            dist = geodesic((coordinates[i][1], coordinates[i][0]), (coordinates[i + 1][1], coordinates[i + 1][0])).meters
-            G.add_edge(node1, node2, weight=dist, distance=dist, elevations=(elevations[i], elevations[i + 1]), flood_depths=(flood_depths[i], flood_depths[i + 1]))
-
+            
+            # Calculate distance between nodes
+            dist = geodesic((coordinates[i][1], coordinates[i][0]), 
+                            (coordinates[i + 1][1], coordinates[i + 1][0])).meters
+            
+            # Get b_prime values if they exist
+            b_prime1 = betweenness_data.get(str(node1), 0)
+            b_prime2 = betweenness_data.get(str(node2), 0)
+            
+            # Add edge with all attributes
+            G.add_edge(node1, node2, 
+                       weight=dist, 
+                       distance=dist, 
+                       elevations=(elevations[i], elevations[i + 1]), 
+                       flood_depths=(flood_depths[i], flood_depths[i + 1]),
+                       b_prime=(b_prime1, b_prime2))
+    
     return G
 
-def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, initial_best_path=None):
-    if forced_astar_points is None:
-        forced_astar_points = {}
+def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
         
-    # Initialize as before
     max_path_length = float('inf')
     if initial_best_path:
         initial_best_path_length = sum(G[initial_best_path[i]][initial_best_path[i + 1]]["distance"] 
@@ -143,36 +155,6 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
             while stack:
                 current_node = stack[-1]
 
-                # Check if we've reached a forced A* transition point
-                if current_node in forced_astar_points and not force_astar:
-                    force_astar = True
-                    current_target = forced_astar_points[current_node]
-                    logging.info(f"Ant {ant + 1} reached transition point {current_node}. Switching to A* targeting {current_target}")
-                    
-                    try:
-                        # Get A* path from current node to intermediate target
-                        astar_path = nx.astar_path(G, current_node, current_target,
-                                                 heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
-                                                 weight='weight')
-                        
-                        # Remove current node to avoid duplication
-                        astar_path = astar_path[1:]
-                        
-                        # Add A* path to stack and visited set
-                        for node in astar_path:
-                            if node not in visited:
-                                stack.append(node)
-                                visited.add(node)
-                                if len(stack) > 1:
-                                    path_length += G[stack[-2]][stack[-1]]["distance"]
-                        
-                        logging.info(f"A* path found and added to ant's path")
-                        continue
-                        
-                    except nx.NetworkXNoPath:
-                        logging.info(f"No A* path found from {current_node} to {current_target}")
-                        break
-
                 if current_node == current_target:
                     if current_target == end_node:
                         path = list(stack)
@@ -191,7 +173,7 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
                             path_lengths.append(path_length)
                         break
                     else:
-                        # We reached intermediate target, now target end_node
+                        # reached intermediate target, now target end_node
                         current_target = end_node
                         continue
 
@@ -199,39 +181,28 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
                 unvisited_neighbors = [n for n in neighbors if n not in visited]
 
                 if unvisited_neighbors:
-                    if force_astar:
-                        # Use only A* heuristic when forced
+                    random_choice = round(random.random(), 1)
+                        
+                    if random_choice > 0.5:
                         desirability = []
                         for neighbor in unvisited_neighbors:
                             heuristic_value = heuristic_extended(neighbor, current_target, G)
                             desirability.append(heuristic_value)
-                        
+                          
                         next_node = unvisited_neighbors[desirability.index(min(desirability))]
-                        logging.info(f"Ant {ant + 1} uses forced A* to select {next_node}")
+                        logging.info(f"Ant {ant + 1} uses A* heuristic to select {next_node}")
                     else:
-                        # Normal ACO behavior
-                        random_choice = round(random.random(), 1)
-                        
-                        if random_choice > 0.5:
-                            desirability = []
-                            for neighbor in unvisited_neighbors:
-                                heuristic_value = heuristic_extended(neighbor, current_target, G)
-                                desirability.append(heuristic_value)
+                        desirability = []
+                        for neighbor in unvisited_neighbors:
+                            distance = G[current_node][neighbor]["distance"]
+                            edge = tuple(sorted((current_node, neighbor)))
+                            pheromone = pheromone_levels.get(edge, 1.0)
+                            desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
                             
-                            next_node = unvisited_neighbors[desirability.index(min(desirability))]
-                            logging.info(f"Ant {ant + 1} uses A* heuristic to select {next_node}")
-                        else:
-                            desirability = []
-                            for neighbor in unvisited_neighbors:
-                                distance = G[current_node][neighbor]["distance"]
-                                edge = tuple(sorted((current_node, neighbor)))
-                                pheromone = pheromone_levels.get(edge, 1.0)
-                                desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
-                            
-                            desirability_sum = sum(desirability)
-                            probabilities = [d / desirability_sum for d in desirability]
-                            next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
-                            logging.info(f"Ant {ant + 1} uses ACO heuristic to select {next_node}")
+                        desirability_sum = sum(desirability)
+                        probabilities = [d / desirability_sum for d in desirability]
+                        next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
+                        logging.info(f"Ant {ant + 1} uses ACO heuristic to select {next_node}")
 
                     potential_path_length = path_length + G[current_node][next_node]["distance"]
                     if potential_path_length <= max_path_length:
@@ -245,7 +216,7 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
 
             all_paths.append(stack)
 
-        # Pheromone updates as before
+        # pheromone update
         for edge in pheromone_levels:
             if edge not in protected_edges:
                 pheromone_levels[edge] *= (1 - evaporation_rate)
@@ -263,7 +234,7 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
     if not path_found:
         return None, float('inf'), []
 
-    # Sort paths by length and filter for paths that end at the end node
+    # sort completed paths
     completed_paths = sorted(
         [(path, sum(G[path[i]][path[i + 1]]["distance"] for i in range(len(path) - 1))) 
          for path in all_paths 
@@ -350,110 +321,111 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
 def main():
     print("runnings tests")
     geojson_file = 'roads_with_elevation_and_flood2.geojson'
+    betweeness_file = 'betweenness_data.json'
     output_excel = 'aco_hybrid_results.xlsx'
 
     # Define start nodes and waypoints
     start_nodes = [
         (125.5520585, 7.0848135),
-        (125.5557261, 7.0479058),
-        (125.6110406, 7.0756111),
-        (125.6294618, 7.1094295),
-        (125.5693223, 7.0471424),
-        (125.6082315, 7.0797573),
-        (125.5999222, 7.0742303),
-        (125.5813902, 7.1009692),
-        (125.5649791, 7.0809453),
-        (125.6078549, 7.0588429),
-        (125.5992942, 7.1079195),
-        (125.6204559, 7.1063729),
-        (125.6155148, 7.0774605),
-        (125.5895257, 7.1093835),
-        (125.5860874, 7.0585475),
-        (125.5679739, 7.042197),
-        (125.5860753, 7.0729699),
-        (125.5992493, 7.063607),
-        (125.589421, 7.0956251),
-        (125.5685605, 7.0716337),
-        (125.5652225, 7.1037087),
-        (125.6260216, 7.0744122),
-        (125.6008342, 7.074818),
-        (125.6092216, 7.0556508),
-        (125.6151783, 7.0950408),
-        (125.6023844, 7.0647222),
-        (125.6122887, 7.0957643),
-        (125.5878275, 7.1066098),
-        (125.6155135, 7.1129291),
-        (125.5748979, 7.0867518),
-        (125.6119228, 7.0901529),
-        (125.6305879, 7.0888433),
-        (125.588251, 7.0828854),
-        (125.5802075, 7.0652194),
-        (125.5758011, 7.1025389),
-        (125.6136619, 7.0971005),
-        (125.6112873, 7.1016861),
-        (125.5904933, 7.0662942),
-        (125.5952838, 7.0779905),
-        (125.6119783, 7.090352),
-        (125.6135774, 7.0603729),
-        (125.5750689, 7.0513503),
-        (125.6204416, 7.0717227),
-        (125.6197874, 7.1082214),
-        (125.595055, 7.0839762),
-        (125.6205352, 7.1117953),
-        (125.6290101, 7.0915868),
-        (125.6004868, 7.0501385),
-        (125.6066222, 7.105572),
-        (125.616509, 7.1008208),
-        (125.6308756, 7.0864334),
-        (125.5776109, 7.1005932),
-        (125.6311633, 7.1095096),
-        (125.5882688, 7.0546153),
-        (125.5882568, 7.0552328),
-        (125.6325084, 7.1120355),
-        (125.6102425, 7.0911402),
-        (125.6259356, 7.1040573),
-        (125.6111768, 7.0554749),
-        (125.6217104, 7.0684683),
-        (125.6236336, 7.1240124),
-        (125.602972, 7.101847),
-        (125.5635374, 7.0504705),
-        (125.5850548, 7.1076778),
-        (125.613681, 7.1067177),
-        (125.6110282, 7.0867481),
-        (125.6000619, 7.0560896),
-        (125.5813632, 7.1006017),
-        (125.6202836, 7.0783214),
-        (125.6008343, 7.0679565),
-        (125.6002622, 7.1132092),
-        (125.6155904, 7.0955002),
-        (125.5918958, 7.0550804),
-        (125.5968052, 7.048139),
-        (125.5979938, 7.11038),
-        (125.5751903, 7.0905102),
-        (125.6180152, 7.0656255),
-        (125.630134, 7.097913),
-        (125.6291087, 7.0990867),
-        (125.5762927, 7.053404),
-        (125.6202769, 7.1157497),
-        (125.6144223, 7.062505),
-        (125.5699834, 7.0638791),
-        (125.6217581, 7.0680991),
-        (125.6291965, 7.1104166),
-        (125.6129826, 7.1121067),
-        (125.6131144, 7.0785856),
-        (125.5999186, 7.1060495),
-        (125.5918126, 7.084462),
-        (125.6107244, 7.0500581),
-        (125.6038221, 7.0609319),
-        (125.6227351, 7.1058975),
-        (125.5612206, 7.1120168),
-        (125.5993987, 7.0606709),
-        (125.6289825, 7.1107528),
-        (125.6248637, 7.0793785),
-        (125.6096956, 7.1074647),
-        (125.5961796, 7.0712703),
-        (125.6132924, 7.0765137),
-        (125.6090221, 7.0734291),
+        # (125.5557261, 7.0479058),
+        # (125.6110406, 7.0756111),
+        # (125.6294618, 7.1094295),
+        # (125.5693223, 7.0471424),
+        # (125.6082315, 7.0797573),
+        # (125.5999222, 7.0742303),
+        # (125.5813902, 7.1009692),
+        # (125.5649791, 7.0809453),
+        # (125.6078549, 7.0588429),
+        # (125.5992942, 7.1079195),
+        # (125.6204559, 7.1063729),
+        # (125.6155148, 7.0774605),
+        # (125.5895257, 7.1093835),
+        # (125.5860874, 7.0585475),
+        # (125.5679739, 7.042197),
+        # (125.5860753, 7.0729699),
+        # (125.5992493, 7.063607),
+        # (125.589421, 7.0956251),
+        # (125.5685605, 7.0716337),
+        # (125.5652225, 7.1037087),
+        # (125.6260216, 7.0744122),
+        # (125.6008342, 7.074818),
+        # (125.6092216, 7.0556508),
+        # (125.6151783, 7.0950408),
+        # (125.6023844, 7.0647222),
+        # (125.6122887, 7.0957643),
+        # (125.5878275, 7.1066098),
+        # (125.6155135, 7.1129291),
+        # (125.5748979, 7.0867518),
+        # (125.6119228, 7.0901529),
+        # (125.6305879, 7.0888433),
+        # (125.588251, 7.0828854),
+        # (125.5802075, 7.0652194),
+        # (125.5758011, 7.1025389),
+        # (125.6136619, 7.0971005),
+        # (125.6112873, 7.1016861),
+        # (125.5904933, 7.0662942),
+        # (125.5952838, 7.0779905),
+        # (125.6119783, 7.090352),
+        # (125.6135774, 7.0603729),
+        # (125.5750689, 7.0513503),
+        # (125.6204416, 7.0717227),
+        # (125.6197874, 7.1082214),
+        # (125.595055, 7.0839762),
+        # (125.6205352, 7.1117953),
+        # (125.6290101, 7.0915868),
+        # (125.6004868, 7.0501385),
+        # (125.6066222, 7.105572),
+        # (125.616509, 7.1008208),
+        # (125.6308756, 7.0864334),
+        # (125.5776109, 7.1005932),
+        # (125.6311633, 7.1095096),
+        # (125.5882688, 7.0546153),
+        # (125.5882568, 7.0552328),
+        # (125.6325084, 7.1120355),
+        # (125.6102425, 7.0911402),
+        # (125.6259356, 7.1040573),
+        # (125.6111768, 7.0554749),
+        # (125.6217104, 7.0684683),
+        # (125.6236336, 7.1240124),
+        # (125.602972, 7.101847),
+        # (125.5635374, 7.0504705),
+        # (125.5850548, 7.1076778),
+        # (125.613681, 7.1067177),
+        # (125.6110282, 7.0867481),
+        # (125.6000619, 7.0560896),
+        # (125.5813632, 7.1006017),
+        # (125.6202836, 7.0783214),
+        # (125.6008343, 7.0679565),
+        # (125.6002622, 7.1132092),
+        # (125.6155904, 7.0955002),
+        # (125.5918958, 7.0550804),
+        # (125.5968052, 7.048139),
+        # (125.5979938, 7.11038),
+        # (125.5751903, 7.0905102),
+        # (125.6180152, 7.0656255),
+        # (125.630134, 7.097913),
+        # (125.6291087, 7.0990867),
+        # (125.5762927, 7.053404),
+        # (125.6202769, 7.1157497),
+        # (125.6144223, 7.062505),
+        # (125.5699834, 7.0638791),
+        # (125.6217581, 7.0680991),
+        # (125.6291965, 7.1104166),
+        # (125.6129826, 7.1121067),
+        # (125.6131144, 7.0785856),
+        # (125.5999186, 7.1060495),
+        # (125.5918126, 7.084462),
+        # (125.6107244, 7.0500581),
+        # (125.6038221, 7.0609319),
+        # (125.6227351, 7.1058975),
+        # (125.5612206, 7.1120168),
+        # (125.5993987, 7.0606709),
+        # (125.6289825, 7.1107528),
+        # (125.6248637, 7.0793785),
+        # (125.6096956, 7.1074647),
+        # (125.5961796, 7.0712703),
+        # (125.6132924, 7.0765137),
+        # (125.6090221, 7.0734291),
     ]
     waypoints = [
         (125.5794607, 7.0664451),  # Shrine Hills
@@ -464,7 +436,7 @@ def main():
     # Load GeoJSON and build graph
     print("building graph")
     geojson_data = load_geojson(geojson_file)
-    G = build_graph(geojson_data)
+    G = build_graph(geojson_data, betweeness_file)
     print("graph built")
 
     # Results storage
@@ -478,6 +450,8 @@ def main():
         shortest_distance = float('inf')
         initial_best_path = None
         end_node = None
+
+        start_time = time.time()
 
         for waypoint in waypoints:
             try:
@@ -509,7 +483,7 @@ def main():
             })
             continue
 
-        start_time = time.time()
+        
         best_path, best_path_length, all_paths, completed_paths = ant_colony_optimization(
             G, 
             start_node, 
