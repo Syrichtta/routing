@@ -9,63 +9,54 @@ from tqdm import tqdm
 import folium
 import math
 
-# Configure logging
+# logging for ant behavior
 logging.basicConfig(level=logging.INFO, filename="aco_log.txt", filemode="w", format="%(message)s")
 
 # ACO parameters
 num_ants = 25
 num_iterations = 50
-alpha = 1.0        # Pheromone importance
-beta = 2.0         # Heuristic importance
+alpha = 1.0        
+beta = 2.0         
 evaporation_rate = 0.1
 pheromone_constant = 100.0
 
-# Function to calculate slope (from A* script)
+# calculate slope (used in heuristic)
 def calculate_slope(node1, node2, G):
     if G.has_edge(node1, node2):
         edge_data = G[node1][node2]
-        elevation1 = edge_data['elevations'][0]  # Elevation of node1
-        elevation2 = edge_data['elevations'][1]  # Elevation of node2
-        horizontal_distance = edge_data['distance']  # Horizontal distance between nodes
+        elevation1 = edge_data['elevations'][0] 
+        elevation2 = edge_data['elevations'][1] 
+        horizontal_distance = edge_data['distance'] 
 
-        # Calculate the change in elevation
         elevation_change = elevation2 - elevation1
 
-        # Calculate slope (rise/run)
-        if horizontal_distance > 0:  # Prevent division by zero
+        if horizontal_distance > 0: 
             slope = elevation_change / horizontal_distance
         else:
             slope = 0
 
         return slope
     else:
-        return 0  # Return 0 if no edge exists
+        return 0  
 
-# Heuristic function from A* script (extended version)
+# modified A* heuristic
 def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0.1, epsilon=7):
-    # Calculate the straight-line distance (h(n))
+
+    # calculate the straight-line distance (h(n))
     h_n = geodesic((node1[1], node1[0]), (node2[1], node2[0])).meters
 
-    # Get g(n): cost from start node to current node (assuming a distance weight)
-    # try:
-    #     g_n = nx.shortest_path_length(G, source=node1, target=node2, weight='distance')
-    # except nx.NetworkXNoPath:
-    #     g_n = float('inf')  # Handle no-path case
-
-    # Get b'(n): inverse betweenness centrality
+    # get b'(n): inverse betweenness centrality
     b_prime = G.nodes[node1].get('b_prime', 0)
 
-    # Initialize metrics
     distance, slope, flood_depth = 0, 0, 0
 
-    # Get edge data if edge exists
+    # get edge data
     edge_data = G.get_edge_data(node1, node2)
     if edge_data:
         distance = edge_data.get('distance', 0)
         slope = calculate_slope(node1, node2, G)
         flood_depth = max(edge_data.get('flood_depths', [0]))
 
-    # Compute total cost (including flood depth as a penalty)
     f_n = (
         alpha * (h_n) +
         beta * b_prime +
@@ -75,13 +66,14 @@ def heuristic_extended(node1, node2, G, alpha=0.2, beta=0.25, gamma=0.2, delta=0
     )
     return f_n
 
-# Load GeoJSON data
+# load GeoJSON data
 def load_geojson(file_path):
     with open(file_path) as f:
         return json.load(f)
-
+    
+# build graph network && apend betweenness
 def build_graph(geojson_data, betweenness_file):
-    # Load betweenness data
+    # load betweenness data
     with open(betweenness_file) as f:
         betweenness_data = json.load(f)
     
@@ -95,15 +87,13 @@ def build_graph(geojson_data, betweenness_file):
             node1 = tuple(coordinates[i])
             node2 = tuple(coordinates[i + 1])
             
-            # Calculate distance between nodes
             dist = geodesic((coordinates[i][1], coordinates[i][0]), 
                             (coordinates[i + 1][1], coordinates[i + 1][0])).meters
             
-            # Get b_prime values if they exist
+            # get betweenness values
             b_prime1 = betweenness_data.get(str(node1), 0)
             b_prime2 = betweenness_data.get(str(node2), 0)
             
-            # Add edge with all attributes
             G.add_edge(node1, node2, 
                        weight=dist, 
                        distance=dist, 
@@ -113,11 +103,9 @@ def build_graph(geojson_data, betweenness_file):
     
     return G
 
-def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, initial_best_path=None):
-    if forced_astar_points is None:
-        forced_astar_points = {}
+# ACO main function
+def ant_colony_optimization(G, start_node, end_node, initial_best_path=None):
         
-    # Initialize as before
     max_path_length = float('inf')
     if initial_best_path:
         initial_best_path_length = sum(G[initial_best_path[i]][initial_best_path[i + 1]]["distance"] 
@@ -156,36 +144,6 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
             while stack:
                 current_node = stack[-1]
 
-                # Check if we've reached a forced A* transition point
-                if current_node in forced_astar_points and not force_astar:
-                    force_astar = True
-                    current_target = forced_astar_points[current_node]
-                    logging.info(f"Ant {ant + 1} reached transition point {current_node}. Switching to A* targeting {current_target}")
-                    
-                    try:
-                        # Get A* path from current node to intermediate target
-                        astar_path = nx.astar_path(G, current_node, current_target,
-                                                 heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
-                                                 weight='weight')
-                        
-                        # Remove current node to avoid duplication
-                        astar_path = astar_path[1:]
-                        
-                        # Add A* path to stack and visited set
-                        for node in astar_path:
-                            if node not in visited:
-                                stack.append(node)
-                                visited.add(node)
-                                if len(stack) > 1:
-                                    path_length += G[stack[-2]][stack[-1]]["distance"]
-                        
-                        logging.info(f"A* path found and added to ant's path")
-                        continue
-                        
-                    except nx.NetworkXNoPath:
-                        logging.info(f"No A* path found from {current_node} to {current_target}")
-                        break
-
                 if current_node == current_target:
                     if current_target == end_node:
                         path = list(stack)
@@ -204,7 +162,7 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
                             path_lengths.append(path_length)
                         break
                     else:
-                        # We reached intermediate target, now target end_node
+                        # reached intermediate target, now target end_node
                         current_target = end_node
                         continue
 
@@ -212,39 +170,28 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
                 unvisited_neighbors = [n for n in neighbors if n not in visited]
 
                 if unvisited_neighbors:
-                    if force_astar:
-                        # Use only A* heuristic when forced
+                    random_choice = round(random.random(), 1)
+                        
+                    if random_choice > 0.5:
                         desirability = []
                         for neighbor in unvisited_neighbors:
                             heuristic_value = heuristic_extended(neighbor, current_target, G)
                             desirability.append(heuristic_value)
-                        
+                          
                         next_node = unvisited_neighbors[desirability.index(min(desirability))]
-                        logging.info(f"Ant {ant + 1} uses forced A* to select {next_node}")
+                        logging.info(f"Ant {ant + 1} uses A* heuristic to select {next_node}")
                     else:
-                        # Normal ACO behavior
-                        random_choice = round(random.random(), 1)
-                        
-                        if random_choice > 0.5:
-                            desirability = []
-                            for neighbor in unvisited_neighbors:
-                                heuristic_value = heuristic_extended(neighbor, current_target, G)
-                                desirability.append(heuristic_value)
+                        desirability = []
+                        for neighbor in unvisited_neighbors:
+                            distance = G[current_node][neighbor]["distance"]
+                            edge = tuple(sorted((current_node, neighbor)))
+                            pheromone = pheromone_levels.get(edge, 1.0)
+                            desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
                             
-                            next_node = unvisited_neighbors[desirability.index(min(desirability))]
-                            logging.info(f"Ant {ant + 1} uses A* heuristic to select {next_node}")
-                        else:
-                            desirability = []
-                            for neighbor in unvisited_neighbors:
-                                distance = G[current_node][neighbor]["distance"]
-                                edge = tuple(sorted((current_node, neighbor)))
-                                pheromone = pheromone_levels.get(edge, 1.0)
-                                desirability.append((pheromone ** alpha) * ((1.0 / distance) ** beta))
-                            
-                            desirability_sum = sum(desirability)
-                            probabilities = [d / desirability_sum for d in desirability]
-                            next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
-                            logging.info(f"Ant {ant + 1} uses ACO heuristic to select {next_node}")
+                        desirability_sum = sum(desirability)
+                        probabilities = [d / desirability_sum for d in desirability]
+                        next_node = random.choices(unvisited_neighbors, weights=probabilities)[0]
+                        logging.info(f"Ant {ant + 1} uses ACO heuristic to select {next_node}")
 
                     potential_path_length = path_length + G[current_node][next_node]["distance"]
                     if potential_path_length <= max_path_length:
@@ -258,7 +205,7 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
 
             all_paths.append(stack)
 
-        # Pheromone updates as before
+        # pheromone update
         for edge in pheromone_levels:
             if edge not in protected_edges:
                 pheromone_levels[edge] *= (1 - evaporation_rate)
@@ -276,7 +223,7 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
     if not path_found:
         return None, float('inf'), []
 
-    # Sort paths by length and filter for paths that end at the end node
+    # sort completed paths
     completed_paths = sorted(
         [(path, sum(G[path[i]][path[i + 1]]["distance"] for i in range(len(path) - 1))) 
          for path in all_paths 
@@ -286,7 +233,8 @@ def ant_colony_optimization(G, start_node, end_node, forced_astar_points=None, i
 
     return best_path, best_path_length, all_paths, [path for path, _ in completed_paths]
 
-def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m/s
+# get path metrics
+def calculate_metrics(path, G, speed_mps):
     total_gain = 0
     total_loss = 0
     max_flood_depth = 0
@@ -296,7 +244,6 @@ def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m
         node1 = path[i]
         node2 = path[i+1]
         
-        # Get edge data between nodes
         edge_data = G.get_edge_data(node1, node2)
         
         # Extract elevations and handle NaN as 0
@@ -325,21 +272,17 @@ def calculate_metrics(path, G, speed_mps=1.5):  # Default walking speed of 1.5 m
     
     return total_gain, total_loss, max_flood_depth, total_distance, travel_time
 
-# Visualization of paths and the entire network
-def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='aco_paths_map.html'):
-    # Create a base map
+# visualization results
+def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html):
     base_map = folium.Map(location=[7.0866, 125.5782], zoom_start=14)  # Center on Davao City
 
-    # Add start and end markers
     folium.Marker(location=(start_node[1], start_node[0]), icon=folium.Icon(color='green', icon='info-sign')).add_to(base_map)
     folium.Marker(location=(end_node[1], end_node[0]), icon=folium.Icon(color='red', icon='info-sign')).add_to(base_map)
 
-    # Visualize the entire network in blue
     for edge in G.edges(data=True):
         node1, node2, _ = edge
         folium.PolyLine(locations=[(lat, lon) for lon, lat in [node1, node2]], color='blue', weight=2.5, opacity=0.7).add_to(base_map)
 
-    # Visualize all paths taken by the ants in red
     for path in all_paths:
         folium.PolyLine(locations=[(lat, lon) for lon, lat in path], color='red', weight=2.5, opacity=0.7).add_to(base_map)
 
@@ -347,50 +290,43 @@ def visualize_paths(G, best_path, all_paths, start_node, end_node, output_html='
         folium.PolyLine(
             locations=[(lat, lon) for lon, lat in best_path], 
             color='green', 
-            weight=4,  # Make it slightly thicker 
-            opacity=1  # Full opacity
+            weight=4,
+            opacity=1
         ).add_to(base_map)
 
-    # Save the map to an HTML file
     base_map.save(output_html)
     print(f"Network and all paths visualized and saved to {output_html}")
 
 def main():
     geojson_file = 'roads_with_elevation_and_flood2.geojson'
     betweeness_file = 'betweenness_data.json'
-    output_html = 'aco_path_map.html'
+    output_html = 'aco_paths_map.html'
 
-    # Fixed start point
     start_node = (125.5992942, 7.1079195)
 
-    
-    # Potential end points
     waypoints = [
         (125.5794607, 7.0664451),  # Shrine Hills
         (125.5657858, 7.1161489), # Manila Memorial Park
         (125.6024582, 7.0766550)   # Rizal Memorial Colleges
     ]
 
-    # Load GeoJSON and build graph
     geojson_data = load_geojson(geojson_file)
     G = build_graph(geojson_data, betweeness_file)
 
-    # Find shortest path to each potential end point
+    # find shortest path to each potential end point
     shortest_distance = float('inf')
     initial_best_path = None
     end_node = None
 
     for waypoint in waypoints:
         try:
-            # Use A* to find path to this waypoint
+            # use A* to find path to this waypoint
             path = nx.astar_path(G, start_node, waypoint,
                                heuristic=lambda n1, n2: heuristic_extended(n1, n2, G),
                                weight='weight')
             
-            # Calculate total distance for this path
-            _, _, _, total_distance, _ = calculate_metrics(path, G)
+            _, _, _, total_distance, _ = calculate_metrics(path, G, speed_mps=1.14)
             
-            # Update if this is the shortest path found
             if total_distance < shortest_distance:
                 shortest_distance = total_distance
                 initial_best_path = path
@@ -408,7 +344,7 @@ def main():
     initial_gain, initial_loss, initial_flood, initial_distance, initial_time = calculate_metrics(
         initial_best_path,
         G,
-        speed_mps=1.5
+        speed_mps=1.14
     )
     
     print("\nInitial Best Path Metrics:")
@@ -428,7 +364,7 @@ def main():
     )
     end_time = time.time()
 
-    # Display results
+    # print results
     if best_path:
         print(f"ACO completed in {end_time - start_time:.2f} seconds")
         print(f"Best path length: {best_path_length:.2f} meters")
@@ -436,7 +372,7 @@ def main():
         total_gain, total_loss, max_flood_depth, total_distance, travel_time = calculate_metrics(
             best_path, 
             G, 
-            speed_mps=1.5  # Average walking speed (can be adjusted)
+            speed_mps=1.14  # walking speed based on average gait
         )
         
         print("\nPath Metrics:")
@@ -445,11 +381,11 @@ def main():
         print(f"Maximum Flood Depth: {max_flood_depth:.2f} meters")
         print(f"Total Path Distance: {total_distance:.2f} meters")
         print(f"Estimated Travel Time: {travel_time:.2f} seconds ({travel_time/60:.2f} minutes)")
-        visualize_paths(G, best_path, all_paths, start_node, end_node)
+        visualize_paths(G, best_path, all_paths, start_node, end_node, output_html)
         print(f"Number of completed paths: {len(completed_paths)}")
     else:
         print("ACO failed to find a path between the start and end nodes.")
-        visualize_paths(G, best_path, all_paths, start_node, end_node)
+        visualize_paths(G, best_path, all_paths, start_node, end_node, output_html)
 
 if __name__ == "__main__":
     main()
